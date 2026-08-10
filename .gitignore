@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+.env
+.DS_Store
+.vscode/
+.idea/
+
+# Data & heavy outputs — never commit
+artifacts/*
+!artifacts/.gitkeep
+data/
+*.pt
+*.pth
+*.onnx
+*.parquet
+*.npy
+*.npz
+wandb/
+runs/
+
+# Keep small reproducibility manifests
+!manifests/*.csv
