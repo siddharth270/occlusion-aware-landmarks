@@ -14,15 +14,27 @@ ON_KAGGLE = Path("/kaggle/input").exists()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+def _find_competition_root() -> Path:
+
+    candidates = [
+        Path("/kaggle/input/competitions/landmark-recognition-2021"),
+        Path("/kaggle/input/landmark-recognition-2021"),
+    ]
+    for c in candidates:
+        if (c / "train.csv").exists():
+            return c
+    return candidates[0]
+
+
 @dataclass
 class Paths:
-
-    # Kaggle mounts inputs read-only, everything that is written goes to artifacts.
-
-    competition: Path = field(default="/kaggle/input/competitions/landmark-recognition-2021")
-    cache: Path = field(default="/kaggle/input/gld21-subset-cache")
-    detections: Path = field(default="/kaggle/input/gld21-detections")
+    competition: Path = field(default_factory=_find_competition_root)
+    cache: Path = Path("/kaggle/input/gld21-subset-cache")
+    detections: Path = Path("/kaggle/input/gld21-detections")
     manifests: Path = REPO_ROOT / "manifests"
+    manifests_out: Path = (
+        Path("/kaggle/working/manifests") if ON_KAGGLE else REPO_ROOT / "manifests"
+    )
     artifacts: Path = Path("/kaggle/working/artifacts") if ON_KAGGLE else REPO_ROOT / "artifacts"
 
 
