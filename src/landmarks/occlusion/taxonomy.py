@@ -23,7 +23,7 @@ TIERS: dict[str, tuple[str, ...]] = {
     "people": ("person",),
 
     # Tier 2 -- transient by definition; parked or passing, never part of the landmark.
-    "vehicles": ("bicycle", "car", "motorcycle", "bus", "truck", "boat"),
+    "vehicles": ("bicycle", "car", "motorcycle", "bus", "truck"),
 
     # Tier 3 -- pets, pigeons, horse-drawn carriages, tourist camels.
     "animals": (
@@ -31,13 +31,21 @@ TIERS: dict[str, tuple[str, ...]] = {
         "elephant", "bear", "zebra", "giraffe",
     ),
 
-    # Tier 4 -- carried by visitors; strongly correlated with crowding.
+    # Tier 4 -- carried by visitors. Deliberately narrow: the wider COCO
+    # sports/tableware classes (frisbee, kite, sports ball, bottle) were
+    # observed firing on architectural features and were removed.
     "portable_objects": (
-        "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
-        "skis", "snowboard", "sports ball", "kite", "baseball bat",
-        "baseball glove", "skateboard", "surfboard", "tennis racket",
-        "bottle", "wine glass", "cup", "cell phone", "laptop", "book",
+        "backpack", "umbrella", "handbag", "suitcase",
     ),
+
+    # OPT-IN. Excluded by default: high false-positive rate on landmark imagery.
+    "misc_objects": (
+        "tie", "frisbee", "skis", "snowboard", "sports ball", "kite",
+        "baseball bat", "baseball glove", "skateboard", "surfboard",
+        "tennis racket", "bottle", "wine glass", "cup", "cell phone",
+        "laptop", "book",
+    ),
+
 
     # Tier 5 -- OPT-IN. Semi-permanent street furniture. Arguably part of the
     # scene rather than noise; included as an ablation, off by default.
@@ -51,7 +59,7 @@ TIERS: dict[str, tuple[str, ...]] = {
 #   airplane -> museum/monument aircraft
 #   train    -> preserved locomotives, station exhibits
 #   clock    -> Big Ben, Prague Astronomical Clock, Musee d'Orsay
-NEVER_MASK: tuple[str, ...] = ("airplane", "train", "clock")
+NEVER_MASK: tuple[str, ...] = ("airplane", "train", "clock", "boat")
 
 DEFAULT_TIERS: tuple[str, ...] = ("people", "vehicles", "animals", "portable_objects")
 
@@ -77,3 +85,25 @@ def describe_taxonomy(tiers: tuple[str, ...] = DEFAULT_TIERS) -> str:
         lines.append(f"  {tier:18s} {', '.join(TIERS[tier])}")
     lines.append(f"  {'never masked':18s} {', '.join(NEVER_MASK)}")
     return "\n".join(lines)
+
+
+# Per-class keep thresholds. `person` is the class COCO detectors are best at
+# and the occluder that matters most, so it gets a permissive threshold.
+# Everything else must clear a high bar: the observed failure mode is rare,
+# low-confidence classes (boat, kite, bird) firing on architecture and
+# fireworks, which then masks the landmark itself.
+CONF_THRESHOLDS: dict[str, float] = {
+    "person": 0.30,
+    "umbrella": 0.40,
+    "car": 0.40,
+    "bus": 0.40,
+    "truck": 0.40,
+    "bicycle": 0.40,
+    "motorcycle": 0.40,
+}
+DEFAULT_CONF_THRESHOLD: float = 0.55
+
+
+def conf_threshold_for(class_name: str) -> float:
+    """Confidence a detection must reach before it is allowed to mask pixels."""
+    return CONF_THRESHOLDS.get(class_name, DEFAULT_CONF_THRESHOLD)

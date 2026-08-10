@@ -8,7 +8,7 @@ from typing import Iterator, Sequence
 
 import numpy as np
 
-from landmarks.occlusion.taxonomy import COCO_CLASSES, transient_class_ids
+from landmarks.occlusion.taxonomy import COCO_CLASSES, transient_class_ids, NEVER_MASK
 
 
 @dataclass
@@ -47,15 +47,14 @@ class TransientDetector:
 
     def __init__(
         self,
-        weights: str = "yolov8s-seg.pt",
+        weights: str = "yolov8m-seg.pt",
         imgsz: int = 640,
         conf: float = 0.10,
         iou: float = 0.70,
         device: int | str = 0,
-        tiers: tuple[str, ...] | None = None,
         use_segmentation: bool = True,
     ) -> None:
-        from ultralytics import YOLO           # imported lazily: heavy dependency
+        from ultralytics import YOLO
 
         self.model = YOLO(weights)
         self.imgsz = imgsz
@@ -63,7 +62,14 @@ class TransientDetector:
         self.iou = iou
         self.device = device
         self.use_segmentation = use_segmentation
-        self.keep_ids = transient_class_ids(tiers) if tiers else transient_class_ids()
+        # Store a SUPERSET: every COCO class except those that can be the
+        # landmark itself. Taxonomy tiers, per-class thresholds and the subject
+        # guard are all applied at mask-render time, so changing any of them
+        # costs CPU seconds instead of another GPU pass over 80k images.
+        self.keep_ids = {
+            i for i, n in enumerate(COCO_CLASSES) if n not in NEVER_MASK
+        }
+
 
     def predict(
         self,
@@ -91,7 +97,7 @@ class TransientDetector:
         )
 
         for path, r in zip(paths, results):
-            yield self._parse(Path(path).stem, r, keep_images)
+            yield self._parse(Path(r.path).stem, r, keep_images)
 
     def _parse(self, image_id: str, r, keep_image: bool) -> ImageDetections:
         h, w = r.orig_shape

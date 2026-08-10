@@ -7,28 +7,53 @@ import pandas as pd
 from landmarks.occlusion.detector import Detection, ImageDetections
 
 
+
+def is_probable_subject(
+    box: tuple[float, float, float, float],
+    min_area: float = 0.25,
+    center_tol: float = 0.30,
+) -> bool:
+    """True if a detection looks like the photo's subject rather than an occluder.
+
+    Motivated by an observed failure mode: COCO detectors label statues as
+    "person" and monumental facades as "boat". Such detections are large and
+    centred, unlike tourists, who are smaller and distributed (observed median
+    detection area is 0.002 of the frame, against this 0.25 threshold). Skipping
+    them protects the landmark at the cost of leaving some genuine large
+    foreground occluders unmasked -- an explicit precision/recall trade,
+    ablatable via `subject_guard`.
+    """
+    x1, y1, x2, y2 = box
+    if (x2 - x1) * (y2 - y1) < min_area:
+        return False
+    cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+    return abs(cx - 0.5) < center_tol and abs(cy - 0.5) < center_tol
+
+
+
 def render_union_mask(
     dets: list[Detection],
     height: int,
     width: int,
-    conf_threshold: float = 0.25,
+    tiers: tuple[str, ...] | None = None,
+    conf_threshold: float | None = None,     # None -> per-class thresholds
     dilate_px: int = 4,
     use_segmentation: bool = True,
+    subject_guard: bool = True,
+    subject_min_area: float = 0.25,
 ) -> np.ndarray:
-    """Union of all transient regions as a uint8 mask in {0, 255}.
+    from landmarks.occlusion.taxonomy import conf_threshold_for, transient_class_ids
 
-    Args:
-        height, width: target resolution. Detections are normalised, so this
-            can differ from the resolution YOLO ran at.
-        conf_threshold: applied here, not at inference -- lets you re-threshold
-            without re-running the detector.
-        dilate_px: grow the mask slightly. Segmentation boundaries are a few
-            pixels tight, leaving a halo of the occluder behind otherwise.
-    """
+    keep = transient_class_ids(tiers) if tiers is not None else transient_class_ids()
     mask = np.zeros((height, width), dtype=np.uint8)
 
     for d in dets:
-        if d.conf < conf_threshold:
+        if d.class_id not in keep:
+            continue
+        thr = conf_threshold if conf_threshold is not None else conf_threshold_for(d.class_name)
+        if d.conf < thr:
+            continue
+        if subject_guard and is_probable_subject(d.box, min_area=subject_min_area):
             continue
 
         if use_segmentation and d.polygon is not None:
