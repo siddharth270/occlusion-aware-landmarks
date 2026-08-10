@@ -53,6 +53,8 @@ class TransientDetector:
         iou: float = 0.70,
         device: int | str = 0,
         use_segmentation: bool = True,
+        max_det: int = 100,
+        half: bool = True,
     ) -> None:
         from ultralytics import YOLO
 
@@ -62,13 +64,17 @@ class TransientDetector:
         self.iou = iou
         self.device = device
         self.use_segmentation = use_segmentation
-        # Store a SUPERSET: every COCO class except those that can be the
-        # landmark itself. Taxonomy tiers, per-class thresholds and the subject
-        # guard are all applied at mask-render time, so changing any of them
-        # costs CPU seconds instead of another GPU pass over 80k images.
+        # A low `conf` is deliberate (store a superset, filter offline), but it
+        # lets NMS return up to `max_det` instances per image, each carrying a
+        # full-resolution mask tensor. 300 x 640 x 640 floats per image OOMs a
+        # T4 at any useful batch size. 100 is far above the real occluder count
+        # in landmark photos (observed ~3/image) while capping memory.
+        self.max_det = max_det
+        self.half = half          # FP16: halves activation memory, ~2x faster on T4
         self.keep_ids = {
             i for i, n in enumerate(COCO_CLASSES) if n not in NEVER_MASK
         }
+
 
 
     def predict(
@@ -91,10 +97,13 @@ class TransientDetector:
             iou=self.iou,
             device=self.device,
             batch=batch_size,
+            max_det=self.max_det,
+            half=self.half,
             retina_masks=False,
             stream=True,
             verbose=verbose,
         )
+
 
         for path, r in zip(paths, results):
             yield self._parse(Path(r.path).stem, r, keep_images)
