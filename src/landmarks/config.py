@@ -19,9 +19,9 @@ class Paths:
 
     # Kaggle mounts inputs read-only, everything that is written goes to artifacts.
 
-    competition: Path = field("/kaggle/input/competitions/landmark-recognition-2021")
-    cache: Path = field("/kaggle/input/gld21-subset-cache")
-    detections: Path = field("/kaggle/input/gld21-detections")
+    competition: Path = field(default="/kaggle/input/competitions/landmark-recognition-2021")
+    cache: Path = field(default="/kaggle/input/gld21-subset-cache")
+    detections: Path = field(default="/kaggle/input/gld21-detections")
     manifests: Path = REPO_ROOT / "manifests"
     artifacts: Path = Path("/kaggle/working/artifacts") if ON_KAGGLE else REPO_ROOT / "artifacts"
 
