@@ -12,7 +12,7 @@ ARMS = ("baseline", "masked", "maskaug")
 
 ON_KAGGLE = Path("/kaggle/input").exists()
 
-REPO_ROOT = Path(__file__).resolve().parent[2]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 @dataclass
 class Paths:
