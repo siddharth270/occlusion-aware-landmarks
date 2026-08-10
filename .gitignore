@@ -8,18 +8,16 @@ venv/
 .vscode/
 .idea/
 
-# Data & heavy outputs — never commit
-artifacts/*
-!artifacts/.gitkeep
-data/
+# Data & heavy outputs — leading slash anchors these to the repo root ONLY,
+# so they can't swallow src/landmarks/data/ or similar package directories.
+/artifacts/*
+!/artifacts/.gitkeep
+/data/
+/runs/
+/wandb/
 *.pt
 *.pth
 *.onnx
 *.parquet
 *.npy
 *.npz
-wandb/
-runs/
-
-# Keep small reproducibility manifests
-!manifests/*.csv
