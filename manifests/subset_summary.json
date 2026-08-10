@@ -1,0 +1,17 @@
+{
+  "seed": 42,
+  "n_classes": 1000,
+  "n_images": 80000,
+  "split_counts": {
+    "train": 64000,
+    "test": 8000,
+    "val": 8000
+  },
+  "min_images_per_class": 30,
+  "max_images_per_class": 80,
+  "split_ratios": [
+    0.8,
+    0.1,
+    0.1
+  ]
+}
