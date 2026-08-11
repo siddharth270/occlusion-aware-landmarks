@@ -92,9 +92,9 @@ class TransientDetector:
         released before the next batch is built.
         """
         for start in range(0, len(paths), batch_size):
-            batch = [str(p) for p in paths[start : start + batch_size]]
+            batch = paths[start : start + batch_size]
             results = self.model.predict(
-                source=batch,
+                source=[str(p) for p in batch],
                 imgsz=self.imgsz,
                 conf=self.conf,
                 iou=self.iou,
@@ -104,11 +104,20 @@ class TransientDetector:
                 stream=False,
                 verbose=verbose,
             )
-            for r in results:
-                # Id comes from the result, not a zipped path list: if
-                # Ultralytics skips an unreadable JPEG, zip() would desync and
-                # every subsequent image would be written under the wrong id.
-                yield self._parse(Path(r.path).stem, r, keep_images)
+
+            # Ids come from the input paths, not from Result.path: for a list
+            # source Ultralytics names results "image0", "image1", ... which
+            # would collapse every batch onto batch_size distinct ids and
+            # silently overwrite images. Pairing by position is only safe if
+            # nothing was dropped, so assert the counts match first.
+            if len(results) != len(batch):
+                raise RuntimeError(
+                    f"detector returned {len(results)} results for {len(batch)} "
+                    "inputs; positional pairing would misalign ids"
+                )
+
+            for p, r in zip(batch, results):
+                yield self._parse(Path(p).stem, r, keep_images)
             del results
 
 
