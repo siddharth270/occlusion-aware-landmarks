@@ -103,8 +103,7 @@ def main() -> None:
 
     print(describe_taxonomy())
     print(f"detector: {cfg.detection.weights} @ {cfg.detection.imgsz}px, "
-          f"conf={cfg.detection.conf}, max_det={cfg.detection.max_det}")
-
+          f"conf={cfg.detection.conf}, max_det={100}")
 
     subset = load_subset(cfg)
     if ARGS.limit:
@@ -119,10 +118,10 @@ def main() -> None:
         imgsz=cfg.detection.imgsz,
         conf=cfg.detection.conf,
         iou=cfg.detection.iou,
-        device=ARGS.device,
-        max_det=cfg.detection.max_det,
+        device=0,
+        max_det=100,
+        half=True,
     )
-
 
     for ci, chunk in enumerate(tqdm(chunks, desc="chunks")):
         idx_path = shard_dir / f"index_{ci:05d}.csv"
