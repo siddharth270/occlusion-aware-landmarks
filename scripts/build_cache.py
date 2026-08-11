@@ -44,6 +44,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--limit", type=int, default=None, help="process only the first N images")
     p.add_argument("--weights", type=str, default=None)
+    p.add_argument("--device", type=int, default=0)
+
     return p.parse_args()
 
 
