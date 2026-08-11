@@ -35,13 +35,17 @@ def resize_short_side(img: np.ndarray, short_side: int = 256) -> np.ndarray:
 
 def save_image(img: np.ndarray, path: str | Path, quality: int = 90) -> None:
     ensure_dir(Path(path).parent)
-    cv2.imwrite(str(path), img, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    # cv2.imwrite returns False instead of raising; an unchecked failure here
+    # would silently produce a cache with missing entries.
+    if not cv2.imwrite(str(path), img, [cv2.IMWRITE_JPEG_QUALITY, quality]):
+        raise IOError(f"failed to write image: {path}")
 
 
 def save_mask(mask: np.ndarray, path: str | Path) -> None:
     """PNG, max compression. Binary masks compress to 1-5 KB."""
     ensure_dir(Path(path).parent)
-    cv2.imwrite(str(path), mask, [cv2.IMWRITE_PNG_COMPRESSION, 9])
+    if not cv2.imwrite(str(path), mask, [cv2.IMWRITE_PNG_COMPRESSION, 9]):
+        raise IOError(f"failed to write mask: {path}")
 
 
 def load_image(image_id: str, root: str | Path) -> np.ndarray:

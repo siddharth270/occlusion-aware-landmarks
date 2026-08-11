@@ -49,17 +49,33 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def process_chunk(det, cfg, chunk: pd.DataFrame, out_dir: Path) -> tuple[list[dict], list[dict]]:
+def process_chunk(
+    det,
+    cfg,
+    chunk: pd.DataFrame,
+    out_dir: Path,
+    batch_size: int,
+) -> tuple[list[dict], list[dict]]:
     """Detect, cache and mask one chunk. Returns (index_rows, detection_rows)."""
     paths = [gld_image_path(i, cfg.paths.competition) for i in chunk["id"]]
+    expected_ids = set(chunk["id"])
     index_rows: list[dict] = []
     det_rows: list[dict] = []
 
     # Consume the stream incrementally: holding 80k decoded images would need
     # ~100GB of RAM.
-    for r in det.predict(paths, batch_size=ARGS.batch_size, keep_images=True):
+    for r in det.predict(paths, batch_size=batch_size, keep_images=True):
         if r.orig_img is None:
             continue
+
+        # The id is derived from the Result's own source path. If that ever
+        # stops being per-image, every image in a batch would be written under
+        # one id and silently overwrite its neighbours -- so assert instead.
+        if r.image_id not in expected_ids:
+            raise ValueError(
+                f"detector returned unexpected image_id {r.image_id!r}; "
+                "Result.path is not per-image and the cache would be corrupt"
+            )
 
         small = resize_short_side(r.orig_img, cfg.cache.short_side)
         h, w = small.shape[:2]
@@ -74,13 +90,16 @@ def process_chunk(det, cfg, chunk: pd.DataFrame, out_dir: Path) -> tuple[list[di
 
         save_image(small, cache_path(r.image_id, out_dir, "images", "jpg"),
                    cfg.cache.jpeg_quality)
-        if mask.any():                       # ~75% of images need no mask file
+
+        has_mask = bool(mask.any())
+        if has_mask:                         # ~75% of images need no mask file
             save_mask(mask, cache_path(r.image_id, out_dir, "masks", "png"))
 
         index_rows.append({
             "id": r.image_id,
             "occlusion_ratio": round(ratio, 6),
             "n_detections": r.n_transient,
+            "has_mask": has_mask,
             "cache_h": h,
             "cache_w": w,
             "orig_h": r.orig_h,
@@ -92,45 +111,43 @@ def process_chunk(det, cfg, chunk: pd.DataFrame, out_dir: Path) -> tuple[list[di
 
 
 def main() -> None:
-    global ARGS
-    ARGS = parse_args()
+    args = parse_args()
 
     cfg = get_config("masked")
-    if ARGS.weights:
-        cfg.detection.weights = ARGS.weights
+    if args.weights:
+        cfg.detection.weights = args.weights
     set_seed(cfg.seed, cfg.deterministic)
 
-    out_dir = ensure_dir(ARGS.out)
+    out_dir = ensure_dir(args.out)
     shard_dir = ensure_dir(out_dir / "_shards")
 
     print(describe_taxonomy())
     print(f"detector: {cfg.detection.weights} @ {cfg.detection.imgsz}px, "
-          f"conf={cfg.detection.conf}, max_det={100}")
+          f"conf={cfg.detection.conf}, max_det={cfg.detection.max_det}")
 
     subset = load_subset(cfg)
-    if ARGS.limit:
-        subset = subset.head(ARGS.limit)
+    if args.limit:
+        subset = subset.head(args.limit)
     print(f"{len(subset):,} images to process")
 
-    chunks = [subset.iloc[i:i + ARGS.chunk_size]
-              for i in range(0, len(subset), ARGS.chunk_size)]
+    chunks = [subset.iloc[i:i + args.chunk_size]
+              for i in range(0, len(subset), args.chunk_size)]
 
     det = TransientDetector(
         weights=cfg.detection.weights,
         imgsz=cfg.detection.imgsz,
         conf=cfg.detection.conf,
         iou=cfg.detection.iou,
-        device=ARGS.device,
+        device=args.device,
         max_det=cfg.detection.max_det,
     )
-
 
     for ci, chunk in enumerate(tqdm(chunks, desc="chunks")):
         idx_path = shard_dir / f"index_{ci:05d}.csv"
         if idx_path.exists():                 # completed in an earlier session
             continue
 
-        index_rows, det_rows = process_chunk(det, cfg, chunk, out_dir)
+        index_rows, det_rows = process_chunk(det, cfg, chunk, out_dir, args.batch_size)
 
         pd.DataFrame(index_rows).to_csv(idx_path, index=False)
         pd.DataFrame(det_rows).to_parquet(
@@ -156,7 +173,31 @@ def main() -> None:
     print(f"\ncached {len(index):,} images, {len(dets):,} detections")
     print(f"occlusion ratio: mean={r.mean():.4f} median={np.median(r):.4f} "
           f"zero={np.mean(r == 0):.1%} max={r.max():.3f}")
-    print(f"mask files written: {sum(1 for _ in (out_dir / 'masks').rglob('*.png')):,}")
+
+    # ---- integrity checks ---------------------------------------------------
+    # The index is built in memory while the files are written to disk, so the
+    # two can diverge (duplicate ids, failed writes) without anything raising.
+    # Downstream training would then read a cache that quietly disagrees with
+    # its own manifest, so verify here rather than discover it in Step 4.
+    n_img_files = sum(1 for _ in (out_dir / "images").rglob("*.jpg"))
+    n_mask_files = sum(1 for _ in (out_dir / "masks").rglob("*.png"))
+    n_expect_mask = int(index.has_mask.sum())
+
+    print(f"index rows={len(index):,} unique ids={index['id'].nunique():,}")
+    print(f"image files on disk={n_img_files:,} (expected {len(index):,})")
+    print(f"mask files on disk={n_mask_files:,} (expected {n_expect_mask:,})")
+
+    problems = []
+    if not index["id"].is_unique:
+        problems.append(f"duplicate ids in index: {len(index) - index['id'].nunique():,}")
+    if n_img_files != len(index):
+        problems.append(f"image file count {n_img_files:,} != index rows {len(index):,}")
+    if n_mask_files != n_expect_mask:
+        problems.append(f"mask file count {n_mask_files:,} != expected {n_expect_mask:,}")
+    if problems:
+        raise RuntimeError("cache integrity check failed:\n  " + "\n  ".join(problems))
+
+    print("integrity checks passed")
 
 
 if __name__ == "__main__":
