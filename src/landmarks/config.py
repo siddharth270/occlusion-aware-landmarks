@@ -54,12 +54,12 @@ class CacheConfig:
 
 @dataclass
 class DetectionConfig:
-
-    weights: str = "yolov8s-seg.pt"
+    weights: str = "yolov8m-seg.pt"    # 's' had unacceptable false-positive rate
     imgsz: int = 640
-    conf: float = 0.25
+    conf: float = 0.10                 # store low, filter per-class at render time
     iou: float = 0.70
-    batch_size: int = 32
+    batch_size: int = 8
+    max_det: int = 100                 # caps per-image mask tensors; see detector.py
     use_segmentation: bool = True
     taxonomy_tiers: tuple[str, ...] = ("people", "vehicles", "animals", "portable_objects")
 
