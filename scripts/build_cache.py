@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Build the image cache + occlusion index.")
     p.add_argument("--out", type=str, default="/kaggle/working/cache")
     p.add_argument("--chunk-size", type=int, default=2000)
-    p.add_argument("--batch-size", type=int, default=16)
+    p.add_argument("--batch-size", type=int, default=4)
     p.add_argument("--limit", type=int, default=None, help="process only the first N images")
     p.add_argument("--weights", type=str, default=None)
     return p.parse_args()
@@ -118,10 +118,10 @@ def main() -> None:
         imgsz=cfg.detection.imgsz,
         conf=cfg.detection.conf,
         iou=cfg.detection.iou,
-        device=0,
-        max_det=100,
-        half=True,
+        device=ARGS.device,
+        max_det=cfg.detection.max_det,
     )
+
 
     for ci, chunk in enumerate(tqdm(chunks, desc="chunks")):
         idx_path = shard_dir / f"index_{ci:05d}.csv"

@@ -54,7 +54,6 @@ class TransientDetector:
         device: int | str = 0,
         use_segmentation: bool = True,
         max_det: int = 100,
-        half: bool = True,
     ) -> None:
         from ultralytics import YOLO
 
@@ -70,7 +69,6 @@ class TransientDetector:
         # T4 at any useful batch size. 100 is far above the real occluder count
         # in landmark photos (observed ~3/image) while capping memory.
         self.max_det = max_det
-        self.half = half          # FP16: halves activation memory, ~2x faster on T4
         self.keep_ids = {
             i for i, n in enumerate(COCO_CLASSES) if n not in NEVER_MASK
         }
@@ -80,33 +78,39 @@ class TransientDetector:
     def predict(
         self,
         paths: Sequence[str | Path],
-        batch_size: int = 32,
+        batch_size: int = 4,
         keep_images: bool = False,
         verbose: bool = False,
     ) -> Iterator[ImageDetections]:
         """Stream detections, one ImageDetections per input path.
 
-        `stream=True` keeps memory flat over 80k images. `keep_images=True`
-        hands back the decoded BGR array so the caller can build the resized
-        cache without a second disk read.
+        Batching is explicit rather than delegated to Ultralytics' `batch=`
+        argument. That path warms the model up with a batch-sized dummy tensor,
+        and in fp32 a yolov8m-seg forward at 640px costs ~0.5GB per image, which
+        OOMs a 15GB T4 long before the requested batch size is reached. Slicing
+        here bounds peak memory exactly and lets each batch's Results objects be
+        released before the next batch is built.
         """
-        results = self.model.predict(
-            source=[str(p) for p in paths],
-            imgsz=self.imgsz,
-            conf=self.conf,
-            iou=self.iou,
-            device=self.device,
-            batch=batch_size,
-            max_det=self.max_det,
-            half=self.half,
-            retina_masks=False,
-            stream=True,
-            verbose=verbose,
-        )
+        for start in range(0, len(paths), batch_size):
+            batch = [str(p) for p in paths[start : start + batch_size]]
+            results = self.model.predict(
+                source=batch,
+                imgsz=self.imgsz,
+                conf=self.conf,
+                iou=self.iou,
+                device=self.device,
+                max_det=self.max_det,
+                retina_masks=False,
+                stream=False,
+                verbose=verbose,
+            )
+            for r in results:
+                # Id comes from the result, not a zipped path list: if
+                # Ultralytics skips an unreadable JPEG, zip() would desync and
+                # every subsequent image would be written under the wrong id.
+                yield self._parse(Path(r.path).stem, r, keep_images)
+            del results
 
-
-        for path, r in zip(paths, results):
-            yield self._parse(Path(r.path).stem, r, keep_images)
 
     def _parse(self, image_id: str, r, keep_image: bool) -> ImageDetections:
         h, w = r.orig_shape
