@@ -145,3 +145,15 @@ class TransientDetector:
                 )
             )
         return out
+
+
+def free_gpu() -> None:
+    """Drop cached allocations. Kaggle kernels hold every model you instantiate,
+    and the cache build calls this between chunks to keep memory flat."""
+    import gc
+
+    import torch
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()

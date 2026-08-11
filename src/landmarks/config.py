@@ -56,7 +56,7 @@ class CacheConfig:
 class DetectionConfig:
 
     weights: str = "yolov8s-seg.pt"
-    img_sz: int = 640
+    imgsz: int = 640
     conf: float = 0.25
     iou: float = 0.70
     batch_size: int = 32
@@ -75,10 +75,13 @@ class OcclusionConfig:
 @dataclass
 class MaskingConfig:
     enabled: bool = False
-    strategy: str = "mean_fill"
-    dilate_px: int = 4
-    max_mask_fraction: float = 0.85
-    apply_prob: float = 1.0
+    strategy: str = "mean_fill"        # black | mean_fill | blur | inpaint_telea
+    dilate_px: int = 4                 # grow masks to catch boundary pixels
+    max_mask_fraction: float = 0.85    # skip if masking would erase the image
+    apply_prob: float = 1.0            # 1.0 = deterministic; <1.0 = augmentation
+    subject_guard: bool = True         # skip large centred detections (statues, facades)
+    subject_min_area: float = 0.25     # area fraction above which the guard applies
+
 
 
 @dataclass
