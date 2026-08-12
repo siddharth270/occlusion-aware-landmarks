@@ -92,10 +92,11 @@ class ArcFaceConfig:
 
 @dataclass
 class ModelConfig:
-    # timm 0.9 renamed pretrained models to <arch>.<weights> form; the old
-    # "tf_efficientnet_b0_ns" no longer resolves. Verify with
-    # timm.list_models("*efficientnet_b0*", pretrained=True) if this errors.
-    backbone: str = "tf_efficientnet_b0.ns_jft_in1k"
+    # timm 1.0 dropped the NoisyStudent B0 weights. The RA4 recipe is timm's
+    # current best B0 checkpoint and is trained at 224px, matching train.image_size
+    # exactly. Verify availability with:
+    #   timm.list_models("*efficientnet_b0*", pretrained=True)
+    backbone: str = "efficientnet_b0.ra4_e3600_r224_in1k"
     pretrained: bool = True
     embedding_dim: int = 512
     head: str = "arcface"
