@@ -325,75 +325,149 @@ Reviewers of a systems-flavoured paper value these, and they are real work.
   because the failure is silent and downstream metrics would still have looked plausible.*
 
 ---
-
 ## V. Results and Analysis
 
-Five components. Fill the numbers when the training job finishes.
+> All numbers below are final, from the held-out **test** split (8,000 images, 1,000
+> classes). Checkpoints were selected on validation GAP, so the test split is uncontaminated
+> by model selection. Seed 42, one run per arm.
+
+**Write §V in this order.** The narrative is: *the stated hypothesis fails → but a larger,
+cleaner effect appears in the off-diagonal → and here is the control proving it is real.*
+Leading with the null is deliberate — it buys you credibility for Finding 2.
 
 ### A. Training dynamics
 
-One figure: val GAP vs epoch, three arms.
+**Figure:** `training_curves.png` — val GAP vs epoch, three arms.
 
-What to point out — convergence rate differences (does masking slow learning by removing
-information, or speed it by removing distractors?), and whether the arms' **ordering** is
-stable across epochs or only at the end. An ordering that flips epoch to epoch is a warning
-that the difference is within run-to-run noise.
+| Arm | Best val GAP | Epoch | Val condition | s/epoch |
+|---|---|---|---|---|
+| baseline | 0.7662 | 14 | raw | 310 |
+| masked | 0.7507 | 12 | masked | 390 |
+| maskaug | 0.7603 | 14 | masked | 355 |
 
-### B. The 2×2 cross-condition matrix — *your central table*
+Three sentences only:
+- **Training loss curves are nearly identical** across arms (13.5 / 13.6 / 13.5 → 0.28 /
+  0.29 / 0.30). Masking neither made the task harder to fit nor destroyed learnable signal.
+  This is a **negative control**: it rules out "the masked arm simply had less to learn from."
+- The masked arm **peaked at epoch 12 and drifted down**, while baseline and maskaug were
+  still rising at 14 — consistent with masked inputs carrying less variety, so the model
+  saturates sooner. Selection on val GAP handled it.
+- **Warn the reader** that these three numbers are *not* comparable: each arm validated on
+  its own input condition. The comparison is §V-B.
 
-| train ↓ / eval → | raw | masked |
-|---|---|---|
-| baseline | — | — |
-| masked | — | — |
-| maskaug | — | — |
+### B. Cross-condition matrix
 
-**Teach the reader to read it, then read it.** The four interpretations:
+**Table 3.** Test-set GAP, rows = training arm, columns = evaluation input.
 
-| Pattern | Interpretation |
-|---|---|
-| `masked/masked` > `baseline/raw` **and** `masked/raw` > `baseline/raw` | Masking genuinely produced better features; the benefit transfers to unmasked input. **Strongest possible result.** |
-| `masked/masked` > `baseline/raw`, but `masked/raw` ≈ or < `baseline/raw` | The gain is **train/test distribution matching**, not better representation. Still a real finding, but a much more modest claim. |
-| `baseline/masked` ≪ `baseline/raw` | The baseline model depends on content in the masked regions. **Note the ambiguity:** that content could be genuine landmark pixels the detector wrongly removed, *or* the shortcut features you hypothesised. Do not overclaim. |
-| `maskaug` ≥ both | The value is in **augmentation diversity**, not in cleaning. This is what the augmentation literature would predict — say so. |
+| train ↓ / eval → | raw | masked | spread |
+|---|---|---|---|
+| baseline | 0.7588 | 0.7443 | **−0.0145** |
+| masked | 0.7623 | **0.7667** | +0.0044 |
+| maskaug | 0.7646 | 0.7641 | −0.0005 |
 
-### C. Stratified GAP — *where the contribution actually lives*
+Teach the reader to read the table (one short paragraph), then make two points:
 
-Table: arm × eval condition × stratum, with **n and 95% CI per cell**.
-Companion figure: GAP vs stratum, one line per arm.
+1. **`masked/raw` (0.7623) > `baseline/raw` (0.7588).** The masked-trained model beats the
+   baseline on *unmasked* images — a condition it never trained on. This is evidence
+   against the "masking merely aligns train and test distributions" confound, which is the
+   whole reason the 2×2 exists. (Note honestly: the difference is +0.0035 and the CIs
+   overlap heavily.)
+2. **The baseline is condition-sensitive; the masked arms are not.** Read the spread column.
+   Removing occluders at test time costs the baseline 1.45 GAP points; the masked arm gains
+   slightly and maskaug is flat to within 0.05 points. This asymmetry is the largest effect
+   anywhere in the results and sets up §V-D.
 
-The claim you are testing is **not** "masked is higher" but **"the arms diverge
-monotonically as occlusion increases."** Explain why that is stronger evidence: an overall
-difference is explicable by fill-colour artefacts or noise, whereas a **dose–response
-relationship** with occlusion is hard to explain any other way.
+### C. The stated hypothesis is not supported
 
-**Mandatory honesty points:**
+**Table 4.** Matched-condition GAP by occlusion stratum, with 95% bootstrap CIs
+(1,000 resamples, paired).
 
-- With **n = 123** in the test `high` stratum, CIs there will be wide. Report them; do not
-  report a bare point estimate. If needed, add a pooled "≥ 0.10" row (n = 440) for the
-  headline claim, clearly labelled as pooled.
-- Since `none` is **81.4%** of images, overall GAP ≈ `none`-stratum GAP by construction.
-  Say this explicitly — it explains why a null overall result is entirely compatible with a
-  real effect at high occlusion, and it is the quantitative justification for your whole
-  stratified design.
+| stratum | n | baseline/raw | masked/masked | Δ | Δ 95% CI | p |
+|---|---|---|---|---|---|---|
+| none | 6,521 | 0.7524 | 0.7589 | +0.0065 | [−0.0034, +0.0158] | 0.215 |
+| low | 1,039 | 0.8075 | 0.8245 | +0.0170 | [−0.0027, +0.0370] | 0.098 |
+| medium | 317 | 0.7689 | 0.7733 | +0.0044 | [−0.0411, +0.0461] | 0.848 |
+| high | 123 | 0.6475 | 0.6587 | +0.0112 | [−0.0752, +0.0963] | 0.764 |
+| **ALL** | 8,000 | 0.7588 | 0.7667 | +0.0079 | [−0.0010, +0.0163] | 0.084 |
 
-### D. Significance
+And for `maskaug` (report the raw column — its matched condition is genuinely ambiguous
+since it trained at p=0.5): ALL Δ +0.0058, CI [−0.0027, +0.0133], p=0.189.
+McNemar, masked vs baseline: 548 fixed, 508 broke, p=0.230.
 
-ΔGAP with 95% CI and p-value for each arm vs baseline in matched conditions, plus
-McNemar's discordant counts (how many images each arm fixed vs broke).
+**Say it plainly.** Deltas are positive in every stratum, never significant, and show no
+dose–response. Do **not** call p=0.084 "marginally significant." One sentence of
+interpretation: the effect direction is consistent with the hypothesis, the magnitude is
+not resolvable at this sample size with one seed per arm.
 
-If the CI straddles zero, **say the result is not statistically distinguishable** — with one
-seed per arm you cannot claim otherwise, and a reviewer will check.
+Add the structural observation: **81.4% of test images sit in the `none` stratum**, where
+masking is a no-op by construction, so the overall figure is by design dominated by images
+the intervention cannot affect.
 
-### E. Qualitative analysis
+### D. A large, monotone, significant asymmetric dependency
 
-Pull concrete examples from `preds_*.parquet`: images the baseline gets wrong and the masked
-arm gets right, **and vice versa**.
+**This is the finding. Give it the most space in §V.**
 
-The second direction matters more — cases where masking *broke* a correct prediction are the
-direct evidence for the over-masking cost you identified in §III-C, and showing them is
-what makes the paper credible rather than promotional.
+**Table 5.** Change in GAP when a model is fed the input condition it was *not* trained on.
 
----
+| stratum | n | baseline: raw→masked | 95% CI | p | masked: masked→raw | maskaug: raw→masked |
+|---|---|---|---|---|---|---|
+| none | 6,521 | +0.0006 | [−0.0006, +0.0017] | 0.369 | +0.0002 | −0.0000 |
+| low | 1,039 | −0.0249 | [−0.0374, −0.0140] | <0.001 | −0.0057 | +0.0004 |
+| medium | 317 | −0.1393 | [−0.1858, −0.0967] | <0.001 | −0.0485 | +0.0070 |
+| high | 123 | **−0.4171** | [−0.5175, −0.3155] | <0.001 | −0.1286 | −0.0429 |
+
+**Figure:** `gap_vs_stratum.png` — GAP vs stratum, one line per cell. The diverging fan is
+the visual argument; make it the largest figure in the paper.
+
+Four points, in order:
+
+1. **Monotone and highly significant.** The baseline degrades progressively with occlusion
+   when transient content is removed, reaching −0.4171 at `high` — four times the CI
+   half-width, p<0.001. Absolute collapse: 0.6475 → **0.2304**, a 64% relative drop.
+2. **The reverse mismatch is 3.5× smaller.** The masked model loses 0.1174 on raw input at
+   `high` (p=0.007) — significant, but far less catastrophic.
+3. **`maskaug` is nearly condition-invariant** (ALL: 0.7646 raw vs 0.7641 masked; worst
+   stratum −0.0429, not significant). Exactly what stochastic masking should produce.
+4. **Anticipate the obvious objection and refute it with your own data.** A reviewer will
+   say: at `high` occlusion you blank 36.5% of the image on average, so *any* model would
+   degrade — this is distribution shift, not shortcut reliance. Your counterfactual answers
+   it: the masked model reaches **0.6587 without access to any transient pixels**,
+   statistically indistinguishable from the baseline's 0.6475 *with* them
+   (Δ +0.0112, CI [−0.0752, +0.0963]). **The information is not necessary.**
+
+### E. Internal control — the `none` stratum
+
+Short but essential. `baseline_masked` vs `baseline_raw` at `none`:
+**Δ +0.0006, CI [−0.0006, +0.0017], p=0.369.**
+
+Where there is nothing to mask, masking changes nothing. This rules out the most dangerous
+alternative explanation available to a reviewer — that the `mean_fill` artefact itself
+perturbs predictions independent of what it covers. **Without this control, Table 5 is not
+credible.** State it as such.
+
+### F. Qualitative analysis
+
+**Figure:** `qualitative_examples.png` — a 2×4 grid built from `preds_*.parquet`.
+
+- Top row: images the **baseline gets right and the masked arm gets wrong** — the cost of
+  over-masking, direct evidence for the detector failures documented in §III-C.3.
+- Bottom row: images the **masked arm fixes** — where removing occluders helped.
+
+Show the *failure* row first. Showing what your method breaks is what separates an analysis
+from a sales pitch, and McNemar says there are 508 such images against 548 fixes — a nearly
+even trade that the reader deserves to see.
+
+### G. Synthesis — state the conclusion in one sentence
+
+> Masking is **sufficient** (transient content carries no task-necessary information),
+> **safe** (no measurable accuracy cost), but not **beneficial** (no measurable accuracy
+> gain). Its value is invariance, not accuracy.
+
+Then the practical implication, which is the paper's payoff: a model deployed where occluder
+statistics differ from training — different seasons, tourist demographics, vehicle fleets —
+inherits the baseline's dependency as a **hidden failure mode**. Masking removes it at no
+accuracy cost, and `maskaug` achieves nearly the same invariance at **+14.5%** per-epoch
+cost instead of **+25.8%**, making it the practical recommendation.
 
 ## VI. Discussion & Limitations
 
@@ -412,10 +486,33 @@ Be specific; vague limitations sections read as filler. Seven items:
 5. **Single seed per arm.** No estimate of run-to-run variance; differences smaller than
    seed noise cannot be resolved. State the required fix (3–5 seeds per arm) and why you
    could not (GPU budget).
-6. **Fill-strategy confound.** Only `mean_fill` was run at full scale. `black`, `blur`,
+
+6. **Statistical power — quantify it, do not just assert it.** This is your strongest
+   limitation paragraph because it comes with a number. The `high` stratum CI half-width is
+   **±0.095 at n=123**. Resolving the observed +0.011 effect needs the interval ~8.6×
+   tighter, i.e. **≈9,100 high-occlusion test images**; at the measured 1.54% prevalence
+   that is a test set of roughly **590,000 images**. So the study is not underpowered by
+   accident — it is underpowered by the **rarity of the phenomenon**, and no Kaggle-scale
+   experiment could resolve an effect this small. This reframes the null as a quantified
+   boundary condition rather than a failure, and it directly motivates occlusion-enriched
+   sampling in §VII.
+
+7. **Occlusion is not randomly assigned — the strata differ in more than occlusion.**
+   `low` outperforms `none` in *every* cell (0.8075 vs 0.7524 for baseline/raw). Lightly
+   occluded images are **easier** than clean ones. The likely reason: photographs containing
+   people are canonical, well-framed shots of famous landmarks, whereas `none` includes
+   interiors, detail crops and oddities. Cross-stratum comparisons are therefore confounded;
+   only *within*-stratum comparisons (which is what Tables 4 and 5 report) are clean. Say
+   this explicitly — a careful reader will notice the inversion and you want to have named
+   it first.
+
+8. **The `maskaug` matched condition is ambiguous.** It trained at p=0.5, so neither raw nor
+   masked is unambiguously "its" condition. Report both columns rather than choosing the
+   flattering one.
+9. **Fill-strategy confound.** Only `mean_fill` was run at full scale. `black`, `blur`,
    `inpaint_telea` remain unablated, so *"masking helps/doesn't help"* is really
    *"mean-fill masking helps/doesn't help."*
-7. **Label noise at the extremes.** Images above ~0.5 occlusion are frequently group
+10. **Label noise at the extremes.** Images above ~0.5 occlusion are frequently group
    photographs with no visible landmark. Masking cannot fix a mislabelled image, and these
    images dilute the `high` stratum.
 
@@ -472,19 +569,7 @@ Order by ratio of payoff to effort — that ordering is itself a contribution.
 Problem → what you built → scale (80k images, 1,000 classes, 3 arms) → the two headline
 numbers (67.0% zero occlusion; your ΔGAP with CI) → the one-sentence finding.
 
-**Figures** (six is right for 6–8 pages):
-
-| File | Section | Role |
-|---|---|---|
-| `class_frequency.png` | III-B | Subset design justification |
-| `occlusion_distribution.png` | III-C.4 | Strata + tail shape |
-| `taxonomy_ablation.png` | III-C.3 | **Your best figure** — permissive vs strict |
-| `masking_midrange.png` | III-D | What masking does in the band that matters |
-| training curves | V-A | Convergence, three arms |
-| GAP vs stratum | V-C | The dose–response claim |
-
-Use `\begin{figure}` for single-column; `figure*` for the 2×2 and stratified tables if they
-need full width.
+**Figures and tables:** see the dedicated section below.
 
 **Tables:** subset composition · taxonomy + thresholds · 2×2 GAP · stratified GAP with CIs ·
 significance.
@@ -492,6 +577,102 @@ significance.
 **Reproducibility statement** — one short paragraph: code on GitHub, frozen manifests
 committed (`subset_splits.csv`, `class_map.csv`, `occlusion_index.csv`), single seed 42,
 exact package versions. Cheap to write, and reviewers weight it.
+
+---
+
+## Figure & table placement
+
+Six figures and five tables is right for 6–8 IEEE pages. **Place each figure in the section
+that argues from it**, not in an appendix — a reader should never have to hunt.
+
+`\begin{figure}` = single column. `\begin{figure*}[t]` = full width, floats to page top;
+use it for the two wide ones marked below.
+
+### Figures
+
+| # | File | Section | Width | Why it goes there |
+|---|---|---|---|---|
+| 1 | `class_frequency.png` | III-B | single | Justifies the 80-image cap: even rank-1000 has ~200 images available |
+| 2 | `taxonomy_ablation.png` | **III-C.3** | **`figure*`** | Your strongest figure. Needs full width — 3 columns × 6 rows |
+| 3 | `occlusion_distribution.png` | III-C.4 | **`figure*`** | Two panels; already 9.2in wide, don't squeeze it |
+| 4 | `masking_midrange.png` | III-D | single | Shows masking working in the band the hypothesis is about |
+| 5 | `training_curves.png` | V-A | single | Three arms converge comparably — the negative control |
+| 6 | `gap_vs_stratum.png` | **V-D** | **`figure*`** | The diverging fan. Make this the largest figure in the paper |
+
+> `masking_examples.png` is the *pre-refinement* version of Figure 2. If you have room,
+> use it as Fig. 2a ("permissive") with `taxonomy_ablation.png` as 2b — otherwise drop it,
+> since the ablation figure already contains a permissive column.
+
+### Captions
+
+Write them so each figure is self-contained — a reader skimming figures should get the paper.
+
+**Fig. 1**
+> Image counts for the 1,000 selected landmark classes in the full GLDv2 training set,
+> ranked by frequency (log scale). All selected classes exceed the 80-image sampling cap,
+> yielding a perfectly balanced 80,000-image subset.
+
+**Fig. 2** *(figure\*)*
+> Effect of taxonomy refinement on masking behaviour. Left: original image. Centre:
+> permissive configuration (all COCO tiers, uniform 0.25 confidence threshold, no subject
+> guard). Right: final configuration (narrowed taxonomy, per-class thresholds, dominant-
+> subject guard). The permissive configuration masks the landmark itself in three of the six
+> cases — a building facade detected as *boat*, a stone statue as *person*, and a fireworks
+> display as *bird/car/person*. Occlusion ratios shown per panel.
+
+**Fig. 3** *(figure\*)*
+> Distribution of transient occlusion across the 80,000-image subset, measured as the
+> fraction of image area covered by the union of YOLOv8m-seg detections in the transient
+> taxonomy. (a) Counts per evaluation stratum. (b) Distribution restricted to the 26,425
+> images with non-zero occlusion, log count axis, dashed lines marking stratum boundaries.
+> 67.0% of images contain no detected transient content; the `high` stratum (ratio ≥ 0.25)
+> holds 1,062 images, of which 123 fall in the test split.
+
+**Fig. 4**
+> Masking applied to mid-range occlusion images (ratio 0.08–0.25), the band in which the
+> landmark remains visible after transient content is removed. Top: raw input. Bottom:
+> `mean_fill` masked input, as seen by the model after augmentation.
+
+**Fig. 5**
+> Validation GAP per epoch for the three training arms. Training loss trajectories are
+> near-identical across arms (final 0.28 / 0.29 / 0.30), indicating masking neither
+> increased task difficulty nor removed learnable signal. Note each arm validates on its own
+> input condition, so the curves are not directly comparable; see Table 3.
+
+**Fig. 6** *(figure\*)*
+> Test-set GAP by occlusion stratum for each (training arm, evaluation input) pair, with 95%
+> bootstrap confidence intervals. The baseline degrades monotonically as occlusion increases
+> when transient regions are removed at test time (−0.4171 at the `high` stratum, p<0.001),
+> while the masked and stochastically-masked arms remain substantially more stable. Stratum
+> sizes: none 6,521, low 1,039, medium 317, high 123.
+
+### Tables
+
+| # | Content | Section | Width | Source |
+|---|---|---|---|---|
+| 1 | Subset composition & splits | III-B | single | §III-B of this guide |
+| 2 | Transient taxonomy + per-class thresholds | III-C.2 | single | §III-C.2 |
+| 3 | 2×2 cross-condition GAP | V-B | single | `cross_condition_gap.csv` |
+| 4 | Matched-condition GAP by stratum, with CIs | V-C | **`table*`** | `stratified_gap_ci.csv` + `stratified_delta_ci.csv` |
+| 5 | Mismatch penalty by stratum, with CIs | V-D | **`table*`** | `stratified_delta_ci.csv` |
+
+Tables 4 and 5 carry n, GAP, CI and p per row, so they need full width. Use `booktabs`
+(`\toprule` / `\midrule` / `\bottomrule`), no vertical rules — that is the IEEE house style
+and it reads far better than the default.
+
+### Two figures you still have to generate
+
+Neither needs a GPU.
+
+**`training_curves.png`** — from the three `history.json` files in
+`artifacts/runs/<arm>/`, each holding per-epoch `train_loss`, `val_gap`, `val_top1`.
+Plot val GAP vs epoch, one line per arm, and mark each arm's selected epoch.
+
+**`gap_vs_stratum.png`** — from `stratified_gap_ci.csv`. X = stratum (none/low/medium/high),
+Y = GAP, one line per cell with CI bands. Six lines is too many to read at once: plot the
+three **matched** cells as solid lines and the three **mismatched** cells as dashed, or
+facet into two panels (matched | mismatched). The diverging fan at the right-hand end is the
+entire visual argument — do not let it get lost in a legend.
 
 ---
 
@@ -545,4 +726,46 @@ EVALUATION
   Bootstrap 1,000 iters; paired bootstrap on delta; exact-binomial McNemar
   Test split only; checkpoints selected on val
   Seed 42 throughout
+
+VAL (each arm on its OWN condition -- not comparable across arms)
+  baseline  0.7662 @ epoch 14   310 s/epoch
+  masked    0.7507 @ epoch 12   390 s/epoch   (+25.8% cost)
+  maskaug   0.7603 @ epoch 14   355 s/epoch   (+14.5% cost)
+
+TEST 2x2 GAP (8,000 images)
+                  eval:raw   eval:masked   spread
+  baseline          0.7588      0.7443     -0.0145
+  masked            0.7623      0.7667     +0.0044
+  maskaug           0.7646      0.7641     -0.0005
+
+HEADLINE COMPARISONS (paired bootstrap, 1,000 iters)
+  masked  vs baseline  dGAP +0.0079  CI [-0.0010, +0.0163]  p=0.084  NOT sig
+  maskaug vs baseline  dGAP +0.0053  CI [-0.0031, +0.0133]  p=0.236  NOT sig
+  McNemar masked:  548 fixed / 508 broke, p=0.230
+  McNemar maskaug: 519 fixed / 488 broke, p=0.344
+
+STRATIFIED GAP, matched conditions (baseline/raw vs masked/masked)
+  stratum    n     base    masked   delta    CI                  p
+  none     6521   0.7524   0.7589  +0.0065  [-0.0034,+0.0158]  0.215
+  low      1039   0.8075   0.8245  +0.0170  [-0.0027,+0.0370]  0.098
+  medium    317   0.7689   0.7733  +0.0044  [-0.0411,+0.0461]  0.848
+  high      123   0.6475   0.6587  +0.0112  [-0.0752,+0.0963]  0.764
+  ALL      8000   0.7588   0.7667  +0.0079  [-0.0010,+0.0163]  0.084
+
+MISMATCH PENALTY  <-- THE FINDING (baseline raw->masked)
+  none     +0.0006  CI [-0.0006,+0.0017]  p=0.369   (internal control: no effect)
+  low      -0.0249  CI [-0.0374,-0.0140]  p<0.001
+  medium   -0.1393  CI [-0.1858,-0.0967]  p<0.001
+  high     -0.4171  CI [-0.5175,-0.3155]  p<0.001   0.6475 -> 0.2304
+  reverse (masked masked->raw) at high: -0.1174, p=0.007  (3.5x smaller)
+  maskaug raw->masked at high: -0.0429, not significant  (most invariant)
+
+POWER
+  high-stratum CI half-width +-0.095 at n=123
+  to resolve +0.011 needs ~9,100 high images -> ~590,000 test images at 1.54% prevalence
+
+CONCLUSION IN ONE LINE
+  Masking is SUFFICIENT (no necessary info in transient regions),
+  SAFE (no accuracy cost), NOT BENEFICIAL (no accuracy gain).
+  Its value is invariance, not accuracy. maskaug = best cost/robustness trade.
 ```
