@@ -92,7 +92,10 @@ class ArcFaceConfig:
 
 @dataclass
 class ModelConfig:
-    backbone: str = "tf_efficientnet_b0_ns"
+    # timm 0.9 renamed pretrained models to <arch>.<weights> form; the old
+    # "tf_efficientnet_b0_ns" no longer resolves. Verify with
+    # timm.list_models("*efficientnet_b0*", pretrained=True) if this errors.
+    backbone: str = "tf_efficientnet_b0.ns_jft_in1k"
     pretrained: bool = True
     embedding_dim: int = 512
     head: str = "arcface"
