@@ -40,19 +40,24 @@ def build_model(cfg, num_classes: int) -> LandmarkNet:
     import timm
 
     name = cfg.model.backbone
-    if name not in timm.list_models():
-        candidates = timm.list_models(f"*{name.split('.')[0].split('_')[-1]}*", pretrained=True)
-        raise ValueError(
-            f"timm has no model {name!r} (timm {timm.__version__}). "
-            f"Similar available names: {candidates[:10]}"
-        )
 
-    backbone = EmbeddingBackbone(
-        name=name,
-        pretrained=cfg.model.pretrained,
-        embedding_dim=cfg.model.embedding_dim,
-        dropout=cfg.model.dropout,
-    )
+    # Try to build rather than pre-checking against list_models(): that returns
+    # architecture names WITHOUT pretrained tags, so a valid "arch.weights"
+    # string never matches and the check rejects working models.
+    try:
+        backbone = EmbeddingBackbone(
+            name=name,
+            pretrained=cfg.model.pretrained,
+            embedding_dim=cfg.model.embedding_dim,
+            dropout=cfg.model.dropout,
+        )
+    except Exception as exc:
+        arch = name.split(".")[0]
+        candidates = timm.list_models(f"*{arch}*", pretrained=True)
+        raise ValueError(
+            f"could not build timm model {name!r} (timm {timm.__version__}): {exc}. "
+            f"Pretrained names matching {arch!r}: {candidates[:10]}"
+        ) from exc
 
     if cfg.model.head == "arcface":
         head: nn.Module = ArcMarginProduct(
