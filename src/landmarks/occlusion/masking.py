@@ -1,3 +1,8 @@
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# The different ways of filling in a masked region. Plain black is avoided by
+# default, because the shape of a black patch is itself something a network can
+# learn to recognise.
+
 from __future__ import annotations
 
 import cv2
@@ -6,6 +11,8 @@ import numpy as np
 STRATEGIES = ("black", "mean_fill", "blur", "inpaint_telea")
 
 
+# Removes the masked region using the chosen fill, and leaves the
+# image untouched if the mask covers too much of it.
 def apply_mask(
     image: np.ndarray,
     mask: np.ndarray,
@@ -13,15 +20,6 @@ def apply_mask(
     max_mask_fraction: float = 0.85,
     blur_kernel: int = 31,
 ) -> np.ndarray:
-    """Remove masked regions from `image`.
-
-    Args:
-        image: HxWx3 uint8 (BGR or RGB -- strategy is channel-agnostic).
-        mask: HxW uint8, non-zero where content should be removed.
-        max_mask_fraction: if the mask covers more than this, return the image
-            unchanged. Erasing 95% of a photo leaves nothing to learn from and
-            would silently poison training with near-blank samples.
-    """
     if strategy not in STRATEGIES:
         raise ValueError(f"strategy must be one of {STRATEGIES}, got {strategy!r}")
 
@@ -37,8 +35,6 @@ def apply_mask(
         out[binary] = 0
 
     elif strategy == "mean_fill":
-        # Mean of the KEPT pixels only -- including masked pixels would bias
-        # the fill colour toward the occluder we are trying to remove.
         fill = image[~binary].reshape(-1, image.shape[2]).mean(axis=0)
         out[binary] = fill.astype(image.dtype)
 
@@ -53,5 +49,6 @@ def apply_mask(
     return out
 
 
+# Fraction of the image that the mask covers.
 def mask_fraction(mask: np.ndarray) -> float:
     return float((mask > 0).mean()) if mask.size else 0.0

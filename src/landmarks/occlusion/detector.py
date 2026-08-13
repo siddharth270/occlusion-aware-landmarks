@@ -1,4 +1,7 @@
-# YOLOv8-seg wrapper for transient occluder detection.
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# Wraps the YOLO segmentation model. It keeps a wide set of detections at a low
+# threshold so the filtering choices can be changed later without having to run
+# the detector over every image again.
 
 from __future__ import annotations
 
@@ -16,8 +19,8 @@ class Detection:
     class_id: int
     class_name: str
     conf: float
-    box: tuple[float, float, float, float]      # normalised xyxy
-    polygon: np.ndarray | None = None           # normalised (N, 2), or None if box-only
+    box: tuple[float, float, float, float]
+    polygon: np.ndarray | None = None
 
 
 @dataclass
@@ -26,25 +29,17 @@ class ImageDetections:
     orig_h: int
     orig_w: int
     detections: list[Detection] = field(default_factory=list)
-    orig_img: np.ndarray | None = None          # BGR; reused so we never re-read the JPEG
+    orig_img: np.ndarray | None = None
 
+    # How many transient objects were kept for this image.
     @property
     def n_transient(self) -> int:
         return len(self.detections)
 
 
 class TransientDetector:
-    """Batched YOLO inference over image paths.
 
-    Args:
-        weights: Ultralytics checkpoint name, e.g. "yolov8s-seg.pt".
-        imgsz: inference resolution. 640 on ~800px source keeps small,
-            distant tourists detectable.
-        conf: keep threshold. Set this LOW (0.10) and filter later --
-            re-thresholding stored detections is free, re-running YOLO is not.
-        tiers: taxonomy tiers defining which classes are transient.
-    """
-
+    # Loads the weights and works out which classes may ever be masked.
     def __init__(
         self,
         weights: str = "yolov8m-seg.pt",
@@ -63,18 +58,13 @@ class TransientDetector:
         self.iou = iou
         self.device = device
         self.use_segmentation = use_segmentation
-        # A low `conf` is deliberate (store a superset, filter offline), but it
-        # lets NMS return up to `max_det` instances per image, each carrying a
-        # full-resolution mask tensor. 300 x 640 x 640 floats per image OOMs a
-        # T4 at any useful batch size. 100 is far above the real occluder count
-        # in landmark photos (observed ~3/image) while capping memory.
         self.max_det = max_det
         self.keep_ids = {
             i for i, n in enumerate(COCO_CLASSES) if n not in NEVER_MASK
         }
 
 
-
+    # Runs detection in small batches and yields one result per image.
     def predict(
         self,
         paths: Sequence[str | Path],
@@ -82,15 +72,6 @@ class TransientDetector:
         keep_images: bool = False,
         verbose: bool = False,
     ) -> Iterator[ImageDetections]:
-        """Stream detections, one ImageDetections per input path.
-
-        Batching is explicit rather than delegated to Ultralytics' `batch=`
-        argument. That path warms the model up with a batch-sized dummy tensor,
-        and in fp32 a yolov8m-seg forward at 640px costs ~0.5GB per image, which
-        OOMs a 15GB T4 long before the requested batch size is reached. Slicing
-        here bounds peak memory exactly and lets each batch's Results objects be
-        released before the next batch is built.
-        """
         for start in range(0, len(paths), batch_size):
             batch = paths[start : start + batch_size]
             results = self.model.predict(
@@ -105,11 +86,6 @@ class TransientDetector:
                 verbose=verbose,
             )
 
-            # Ids come from the input paths, not from Result.path: for a list
-            # source Ultralytics names results "image0", "image1", ... which
-            # would collapse every batch onto batch_size distinct ids and
-            # silently overwrite images. Pairing by position is only safe if
-            # nothing was dropped, so assert the counts match first.
             if len(results) != len(batch):
                 raise RuntimeError(
                     f"detector returned {len(results)} results for {len(batch)} "
@@ -121,6 +97,7 @@ class TransientDetector:
             del results
 
 
+    # Turns one raw detection result into normalised boxes and polygons.
     def _parse(self, image_id: str, r, keep_image: bool) -> ImageDetections:
         h, w = r.orig_shape
         out = ImageDetections(
@@ -137,7 +114,6 @@ class TransientDetector:
         conf = r.boxes.conf.cpu().numpy()
         xyxyn = r.boxes.xyxyn.cpu().numpy()
 
-        # Ultralytics gives one polygon per detection, in the same order as boxes.
         polys = None
         if self.use_segmentation and r.masks is not None:
             polys = r.masks.xyn
@@ -160,9 +136,8 @@ class TransientDetector:
         return out
 
 
+# Releases cached GPU memory between chunks.
 def free_gpu() -> None:
-    """Drop cached allocations. Kaggle kernels hold every model you instantiate,
-    and the cache build calls this between chunks to keep memory flat."""
     import gc
 
     import torch

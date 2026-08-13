@@ -1,9 +1,7 @@
-"""Training and validation loops.
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# The training and validation loops. Checkpoints are kept by validation GAP rather
+# than accuracy, since GAP is the metric the project reports.
 
-Every arm runs this identical code. The only thing that differs is the
-`apply_masking` flag on the training dataset, which is what makes the comparison
-a controlled experiment rather than two loosely related runs.
-"""
 from __future__ import annotations
 
 import json
@@ -21,13 +19,10 @@ from landmarks.eval.gap import global_average_precision, predictions_from_logits
 from landmarks.utils.io import ensure_dir
 
 
+# Learning rate that ramps up over the first epoch and then decays
+# along a cosine.
 def cosine_schedule_with_warmup(optimizer, warmup_steps: int, total_steps: int):
-    """Linear warmup then cosine decay to zero.
-
-    Warmup matters here: ArcFace logits are large at initialisation, and a cold
-    start at full learning rate frequently diverges in the first few hundred
-    steps.
-    """
+    # Multiplier applied to the base learning rate at a given step.
     def lr_lambda(step: int) -> float:
         if step < warmup_steps:
             return float(step) / float(max(1, warmup_steps))
@@ -37,6 +32,7 @@ def cosine_schedule_with_warmup(optimizer, warmup_steps: int, total_steps: int):
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
+# Runs one training epoch and returns the average loss.
 def train_one_epoch(
     model: nn.Module,
     loader: DataLoader,
@@ -58,7 +54,7 @@ def train_one_epoch(
 
         optimizer.zero_grad(set_to_none=True)
         with torch.autocast("cuda", enabled=scaler.is_enabled()):
-            logits = model(images, labels)          # labels drive the ArcFace margin
+            logits = model(images, labels)
             loss = criterion(logits, labels)
 
         scaler.scale(loss).backward()
@@ -77,16 +73,15 @@ def train_one_epoch(
     return running / max(1, n)
 
 
+# Runs the model over a loader and returns the labels and logits.
 @torch.no_grad()
 def predict(model: nn.Module, loader: DataLoader, device: torch.device, desc: str = "eval"):
-    """Return (labels, logits) for a whole loader, as float32 numpy arrays."""
     model.eval()
     all_logits, all_labels = [], []
 
     for images, labels in tqdm(loader, desc=desc, leave=False):
         images = images.to(device, non_blocking=True)
         with torch.autocast("cuda", enabled=torch.cuda.is_available()):
-            # No labels: the head returns plain scaled cosine logits.
             logits = model(images)
         all_logits.append(logits.float().cpu().numpy())
         all_labels.append(labels.numpy())
@@ -94,6 +89,7 @@ def predict(model: nn.Module, loader: DataLoader, device: torch.device, desc: st
     return np.concatenate(all_labels), np.concatenate(all_logits)
 
 
+# Scores a loader and returns GAP alongside top-1 accuracy.
 def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, desc: str = "eval") -> dict:
     labels, logits = predict(model, loader, device, desc)
     preds, confs = predictions_from_logits(logits)
@@ -104,6 +100,8 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, desc: s
     }
 
 
+# Trains for the configured epochs, keeping the checkpoint with the
+# best validation GAP.
 def fit(
     model: nn.Module,
     train_loader: DataLoader,
@@ -112,12 +110,6 @@ def fit(
     device: torch.device,
     run_dir: str | Path,
 ) -> dict:
-    """Train one arm, selecting the checkpoint by validation GAP.
-
-    GAP rather than accuracy for model selection, because GAP is the reported
-    metric and rewards calibrated confidence -- selecting on accuracy would
-    optimise something the study does not measure.
-    """
     run_dir = ensure_dir(run_dir)
     model.to(device)
 

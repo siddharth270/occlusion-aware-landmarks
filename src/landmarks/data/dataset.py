@@ -1,13 +1,7 @@
-"""Dataset reading the cached images, with masking as a switchable hook.
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# The PyTorch dataset. Masking is a switch passed in when the dataset is built, so
+# the same class can serve raw or masked images to any of the trained models.
 
-`apply_masking` is a constructor argument rather than something read from the
-config's arm. That is what makes the 2x2 cross-condition evaluation possible: a
-model trained on masked data can be evaluated on raw validation images, and vice
-versa, using the same class with a different flag.
-
-Masking is applied to the decoded image BEFORE augmentation, because it models a
-data-cleaning step on the source photo rather than a geometric transform.
-"""
 from __future__ import annotations
 
 import random
@@ -24,20 +18,9 @@ from landmarks.occlusion.masking import apply_mask
 
 
 class LandmarkDataset(Dataset):
-    """Cached landmark images with optional transient-region masking.
 
-    Args:
-        frame: rows from the subset manifest, already merged with the occlusion
-            index (needs columns: id, label, has_mask).
-        cache_root: directory containing images/ and masks/.
-        transform: torchvision transform applied to a PIL RGB image.
-        apply_masking: whether to remove transient regions at all.
-        strategy: fill strategy, see landmarks.occlusion.masking.STRATEGIES.
-        apply_prob: probability of masking a given sample. 1.0 is deterministic
-            cleaning; values below 1.0 turn masking into a stochastic
-            augmentation (the `maskaug` arm).
-    """
-
+    # Sets up the dataset and copies the columns into lists, since
+    # DataFrame lookups are too slow to do once per item.
     def __init__(
         self,
         frame: pd.DataFrame,
@@ -60,26 +43,27 @@ class LandmarkDataset(Dataset):
         self.apply_prob = apply_prob
         self.max_mask_fraction = max_mask_fraction
 
-        # Materialise as plain lists: DataFrame row access in __getitem__ is
-        # slow enough to starve the GPU at this batch size.
         self.ids: list[str] = frame["id"].astype(str).tolist()
         self.labels: list[int] = frame["label"].astype(int).tolist()
         self.has_mask: list[bool] = frame["has_mask"].astype(bool).tolist()
 
+    # Number of images in this split.
     def __len__(self) -> int:
         return len(self.ids)
 
+    # Decides whether this sample gets masked, which is random for
+    # the maskaug arm.
     def _should_mask(self, index: int) -> bool:
         if not self.apply_masking or not self.has_mask[index]:
             return False
         if self.apply_prob >= 1.0:
             return True
-        # Seeded per worker via landmarks.utils.seed.worker_init_fn.
         return random.random() < self.apply_prob
 
+    # Loads one image, masks it if required, then applies the transforms.
     def __getitem__(self, index: int):
         image_id = self.ids[index]
-        img = load_image(image_id, self.cache_root)          # BGR uint8
+        img = load_image(image_id, self.cache_root)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         if self._should_mask(index):
@@ -89,17 +73,13 @@ class LandmarkDataset(Dataset):
         return self.transform(Image.fromarray(img)), self.labels[index]
 
 
+# Joins the split manifest to the occlusion index and fails if the
+# two disagree about which images exist.
 def build_frame(
     subset: pd.DataFrame,
     occlusion_index: pd.DataFrame,
     split: str | None = None,
 ) -> pd.DataFrame:
-    """Join the split manifest to the occlusion index.
-
-    Inner join on purpose: an image present in the manifest but absent from the
-    cache is a build error, and the assertion below surfaces it rather than
-    letting training run on a silently truncated set.
-    """
     cols = ["id", "occlusion_ratio", "has_mask", "cache_h", "cache_w"]
     frame = subset.merge(occlusion_index[cols], on="id", how="inner")
 
@@ -114,5 +94,6 @@ def build_frame(
     return frame
 
 
+# Reads the occlusion index, keeping image ids as strings.
 def load_occlusion_index(path: str | Path) -> pd.DataFrame:
     return pd.read_csv(path, dtype={"id": str})

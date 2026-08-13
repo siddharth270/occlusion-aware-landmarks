@@ -1,15 +1,8 @@
-"""Step 5: evaluate every trained arm and produce the report tables.
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# Loads each trained model and scores it on the test split twice, once on raw
+# images and once on masked ones. Writes the cross condition table, the results
+# broken down by occlusion level, and the significance tests.
 
-Each arm's best checkpoint is evaluated on the held-out TEST split under both
-input conditions (raw and masked), giving the 2x2 cross-condition matrix, plus a
-GAP breakdown by occlusion stratum and paired significance tests.
-
-The test split is used here and nowhere else -- checkpoints were selected on val
-GAP, so these numbers are not contaminated by model selection.
-
-    python scripts/evaluate.py --cache /kaggle/working/cache
-    python scripts/evaluate.py --arms baseline masked --split test
-"""
 from __future__ import annotations
 
 import argparse
@@ -36,6 +29,7 @@ from landmarks.utils.io import ensure_dir
 from landmarks.utils.seed import set_seed, worker_init_fn
 
 
+# Reads the command line options for the evaluation run.
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Evaluate all arms and build result tables.")
     p.add_argument("--arms", nargs="+", default=list(ARMS))
@@ -48,9 +42,10 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+# Scores one trained model on one input condition and returns its
+# predictions with the confidence attached to each.
 def eval_one(cfg, ckpt_path: Path, frame, cache_root, num_classes, mask_eval: bool,
              device, workers: int):
-    """Run one (arm, condition) cell. Returns (preds, confs)."""
     from torch.utils.data import DataLoader
 
     dataset = LandmarkDataset(
@@ -61,8 +56,6 @@ def eval_one(cfg, ckpt_path: Path, frame, cache_root, num_classes, mask_eval: bo
         apply_prob=1.0 if mask_eval else 0.0,
         max_mask_fraction=cfg.masking.max_mask_fraction,
     )
-    # shuffle=False so predictions stay aligned with `frame` row order, which is
-    # what lets us join occlusion ratios back on afterwards.
     loader = DataLoader(dataset, batch_size=cfg.eval.batch_size, shuffle=False,
                         num_workers=workers, pin_memory=True,
                         worker_init_fn=worker_init_fn)
@@ -82,6 +75,8 @@ def eval_one(cfg, ckpt_path: Path, frame, cache_root, num_classes, mask_eval: bo
     return predictions_from_logits(logits)
 
 
+# Evaluates every arm on both raw and masked input, then writes the
+# result tables and the significance tests.
 def main() -> None:
     args = parse_args()
 
@@ -129,7 +124,6 @@ def main() -> None:
     if not stratified:
         raise RuntimeError(f"no checkpoints found under {runs_root}")
 
-    # ---- tables -------------------------------------------------------------
     strat_all = pd.concat(stratified.values(), ignore_index=True)
     strat_all.to_csv(out_dir / "stratified_gap.csv", index=False)
 
@@ -138,9 +132,6 @@ def main() -> None:
     print("\ncross-condition GAP (rows=train arm, cols=eval input):")
     print(matrix.round(4).to_string())
 
-    # ---- significance -------------------------------------------------------
-    # Headline comparison: each arm evaluated in its own matched condition,
-    # i.e. how the pipeline would actually be deployed.
     y = frame.label.values
     report: dict = {"split": args.split, "n": int(len(frame)), "arms": {}, "tests": {}}
 
@@ -153,6 +144,7 @@ def main() -> None:
         }
         print(f"{arm:9s}/{condition:6s} GAP {point:.4f}  95% CI [{lo:.4f}, {hi:.4f}]")
 
+    # Gives the input condition that an arm was trained on.
     def matched(arm: str) -> str:
         return "masked" if get_config(arm).masking.enabled else "raw"
 
@@ -177,7 +169,6 @@ def main() -> None:
     with open(out_dir / "significance.json", "w") as f:
         json.dump(report, f, indent=2)
 
-    # Per-image predictions, so the report can be rebuilt without re-running the GPU.
     for (arm, condition), (preds, confs) in predictions.items():
         pd.DataFrame({
             "id": frame.id.values, "label": y, "pred": preds, "conf": confs,

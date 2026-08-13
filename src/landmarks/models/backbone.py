@@ -1,4 +1,7 @@
-"""timm feature extractor plus embedding neck."""
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# The pretrained image encoder and the small stack of layers that turns its output
+# into a fixed size embedding.
+
 from __future__ import annotations
 
 import torch
@@ -6,13 +9,9 @@ import torch.nn as nn
 
 
 class EmbeddingBackbone(nn.Module):
-    """Pretrained CNN reduced to a fixed-size embedding.
 
-    The neck (BN -> dropout -> linear -> BN) is the standard recipe for metric
-    learning heads: the trailing BatchNorm keeps embedding magnitudes stable,
-    which matters because ArcFace L2-normalises them.
-    """
-
+    # Builds the pretrained trunk and the layers that reduce it to a
+    # fixed size embedding.
     def __init__(
         self,
         name: str = "efficientnet_b0",
@@ -23,7 +22,6 @@ class EmbeddingBackbone(nn.Module):
         super().__init__()
         import timm
 
-        # num_classes=0 + global_pool="avg" gives pooled features, no classifier.
         self.trunk = timm.create_model(
             name, pretrained=pretrained, num_classes=0, global_pool="avg"
         )
@@ -37,5 +35,6 @@ class EmbeddingBackbone(nn.Module):
         )
         self.embedding_dim = embedding_dim
 
+    # Turns a batch of images into embeddings.
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.neck(self.trunk(x))

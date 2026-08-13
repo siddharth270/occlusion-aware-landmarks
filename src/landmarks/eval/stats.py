@@ -1,11 +1,7 @@
-"""Significance testing for the arm comparison.
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# The significance tests. Both of them compare two models on the same images, which
+# makes them more sensitive than treating the two scores as unrelated.
 
-Two arms trained with one seed each cannot be compared by eyeballing two GAP
-numbers: the difference has to be put against the sampling variability of the
-test set. Both tests here are *paired* -- the arms are evaluated on identical
-images, so pairing removes between-image difficulty as a source of variance and
-is far more sensitive than treating the two scores as independent.
-"""
 from __future__ import annotations
 
 import math
@@ -15,6 +11,7 @@ import numpy as np
 from landmarks.eval.gap import global_average_precision
 
 
+# Bootstrap confidence interval for a single model's GAP.
 def bootstrap_gap_ci(
     labels: np.ndarray,
     preds: np.ndarray,
@@ -23,10 +20,6 @@ def bootstrap_gap_ci(
     alpha: float = 0.05,
     seed: int = 42,
 ) -> tuple[float, float, float]:
-    """Percentile bootstrap CI for a single arm's GAP.
-
-    Returns (point_estimate, lower, upper).
-    """
     labels, preds, confs = map(np.asarray, (labels, preds, confs))
     n = len(labels)
     point = global_average_precision(labels, preds, confs)
@@ -41,6 +34,8 @@ def bootstrap_gap_ci(
     return float(point), float(lo), float(hi)
 
 
+# Confidence interval and p-value for the GAP difference between two
+# models scored on the same images.
 def paired_bootstrap_delta(
     labels: np.ndarray,
     preds_a: np.ndarray, confs_a: np.ndarray,
@@ -49,12 +44,6 @@ def paired_bootstrap_delta(
     alpha: float = 0.05,
     seed: int = 42,
 ) -> dict:
-    """CI and p-value for GAP(b) - GAP(a), resampling images (not predictions).
-
-    The same bootstrap indices are applied to both arms, which is what makes it
-    paired. `p_value` is two-sided and estimated as the proportion of resamples
-    whose delta has the opposite sign to the observed delta, doubled.
-    """
     labels = np.asarray(labels)
     n = len(labels)
 
@@ -84,43 +73,29 @@ def paired_bootstrap_delta(
     }
 
 
+# Two sided exact binomial p-value against a fair coin.
 def _binom_two_sided_p(k: int, n: int) -> float:
-    """Two-sided exact binomial p-value against p=0.5.
-
-    Implemented directly rather than via scipy: the symmetric case reduces to
-    2 * min(P(X<=k), P(X>=k)), and keeping this module dependency-free means the
-    significance tests cannot fail on a package that isn't installed.
-    """
     if n == 0:
         return 1.0
-    total = 1 << n                                   # 2**n
+    total = 1 << n
     lower = sum(math.comb(n, i) for i in range(0, k + 1))
     upper = sum(math.comb(n, i) for i in range(k, n + 1))
     return float(min(1.0, 2.0 * min(lower, upper) / total))
 
 
+# Upper tail p-value for a chi-square with one degree of freedom.
 def _chi2_1df_p(chi2: float) -> float:
-    """Upper-tail p for chi-square with 1 df: P(X>x) = erfc(sqrt(x/2))."""
     return float(math.erfc(math.sqrt(chi2 / 2.0)))
 
 
+# McNemar test on which images each model got right, using only the
+# ones where the two disagree.
 def mcnemar(correct_a: np.ndarray, correct_b: np.ndarray) -> dict:
-    """McNemar test on per-image correctness (top-1, not GAP).
-
-    Only the discordant pairs carry information: images both arms get right or
-    both get wrong say nothing about which is better. Reported alongside the
-    bootstrap because it tests accuracy rather than ranking, and agreement
-    between two different tests is more convincing than either alone.
-
-    Exact binomial for small samples; chi-square with Yates' continuity
-    correction once the exact computation would need thousands of big-integer
-    binomial coefficients.
-    """
     correct_a = np.asarray(correct_a).astype(bool)
     correct_b = np.asarray(correct_b).astype(bool)
 
-    b_only = int(np.sum(~correct_a & correct_b))     # b fixed what a got wrong
-    a_only = int(np.sum(correct_a & ~correct_b))     # b broke what a got right
+    b_only = int(np.sum(~correct_a & correct_b))
+    a_only = int(np.sum(correct_a & ~correct_b))
     n_disc = a_only + b_only
 
     if n_disc == 0:

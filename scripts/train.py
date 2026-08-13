@@ -1,13 +1,7 @@
-"""Step 4: train one experimental arm.
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# Trains one of the three arms. Everything except the input masking is identical
+# between arms, which is what makes the comparison a fair one.
 
-    python scripts/train.py --arm baseline
-    python scripts/train.py --arm masked
-    python scripts/train.py --arm maskaug        # optional third arm
-
-Every arm shares this entry point, this config, and this seed. The only thing
-that varies is whether the training set has transient regions removed, which is
-what licenses attributing any difference in GAP to masking.
-"""
 from __future__ import annotations
 
 import argparse
@@ -28,6 +22,7 @@ from landmarks.models.build import build_model, count_parameters
 from landmarks.utils.seed import set_seed, worker_init_fn
 
 
+# Reads the command line options, all of which override a config default.
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train one arm of the occlusion study.")
     p.add_argument("--arm", choices=ARMS, required=True)
@@ -44,6 +39,8 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+# Wraps a dataset in a DataLoader using settings shared by training
+# and validation.
 def make_loader(dataset, batch_size: int, workers: int, shuffle: bool) -> DataLoader:
     return DataLoader(
         dataset,
@@ -51,13 +48,15 @@ def make_loader(dataset, batch_size: int, workers: int, shuffle: bool) -> DataLo
         shuffle=shuffle,
         num_workers=workers,
         pin_memory=True,
-        drop_last=shuffle,                 # stable BatchNorm stats during training
+        drop_last=shuffle,
         persistent_workers=workers > 0,
         prefetch_factor=4 if workers > 0 else None,
         worker_init_fn=worker_init_fn,
     )
 
 
+# Trains one arm end to end and saves the checkpoint with the best
+# validation GAP.
 def main() -> None:
     args = parse_args()
 
@@ -78,7 +77,6 @@ def main() -> None:
     set_seed(cfg.seed, cfg.deterministic)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # ---- data ---------------------------------------------------------------
     cache_root = Path(args.cache)
     index_path = Path(args.index) if args.index else cache_root / "occlusion_index.csv"
 
@@ -98,9 +96,6 @@ def main() -> None:
         apply_prob=cfg.masking.apply_prob,
         max_mask_fraction=cfg.masking.max_mask_fraction,
     )
-    # Validation matches the training condition, so early stopping is measured
-    # under the same distribution the model was trained on. The 2x2
-    # cross-condition table is built separately in scripts/evaluate.py.
     val_ds = LandmarkDataset(
         val_frame, cache_root,
         transform=build_transforms(cfg.train.image_size, train=False),
@@ -113,7 +108,6 @@ def main() -> None:
     train_loader = make_loader(train_ds, cfg.train.batch_size, cfg.train.num_workers, True)
     val_loader = make_loader(val_ds, cfg.eval.batch_size, cfg.train.num_workers, False)
 
-    # ---- model --------------------------------------------------------------
     model = build_model(cfg, num_classes)
 
     run_dir = Path(args.out) if args.out else cfg.run_dir

@@ -1,6 +1,9 @@
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# Decides which object classes count as transient. A few classes are never masked
+# because they can be the landmark themselves, like a clock tower or a museum plane.
+
 from __future__ import annotations
 
-# COCO-80 in class-id order, as used by all Ultralytics YOLO detection weights.
 COCO_CLASSES: tuple[str, ...] = (
     "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck",
     "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench",
@@ -19,26 +22,19 @@ COCO_CLASSES: tuple[str, ...] = (
 NAME_TO_ID: dict[str, int] = {name: i for i, name in enumerate(COCO_CLASSES)}
 
 TIERS: dict[str, tuple[str, ...]] = {
-    # Tier 1 -- the dominant occluder in tourist photography.
     "people": ("person",),
 
-    # Tier 2 -- transient by definition; parked or passing, never part of the landmark.
     "vehicles": ("bicycle", "car", "motorcycle", "bus", "truck"),
 
-    # Tier 3 -- pets, pigeons, horse-drawn carriages, tourist camels.
     "animals": (
         "bird", "cat", "dog", "horse", "sheep", "cow",
         "elephant", "bear", "zebra", "giraffe",
     ),
 
-    # Tier 4 -- carried by visitors. Deliberately narrow: the wider COCO
-    # sports/tableware classes (frisbee, kite, sports ball, bottle) were
-    # observed firing on architectural features and were removed.
     "portable_objects": (
         "backpack", "umbrella", "handbag", "suitcase",
     ),
 
-    # OPT-IN. Excluded by default: high false-positive rate on landmark imagery.
     "misc_objects": (
         "tie", "frisbee", "skis", "snowboard", "sports ball", "kite",
         "baseball bat", "baseball glove", "skateboard", "surfboard",
@@ -47,25 +43,19 @@ TIERS: dict[str, tuple[str, ...]] = {
     ),
 
 
-    # Tier 5 -- OPT-IN. Semi-permanent street furniture. Arguably part of the
-    # scene rather than noise; included as an ablation, off by default.
     "street_furniture": (
         "bench", "chair", "potted plant", "dining table",
         "traffic light", "fire hydrant", "parking meter", "stop sign",
     ),
 }
 
-# Deliberately never masked: each of these can BE the landmark.
-#   airplane -> museum/monument aircraft
-#   train    -> preserved locomotives, station exhibits
-#   clock    -> Big Ben, Prague Astronomical Clock, Musee d'Orsay
 NEVER_MASK: tuple[str, ...] = ("airplane", "train", "clock", "boat")
 
 DEFAULT_TIERS: tuple[str, ...] = ("people", "vehicles", "animals", "portable_objects")
 
 
+# Turns tier names into the set of COCO class ids that may be masked.
 def transient_class_ids(tiers: tuple[str, ...] = DEFAULT_TIERS) -> set[int]:
-    """Resolve tier names to the COCO class ids that should be masked."""
     unknown = set(tiers) - set(TIERS)
     if unknown:
         raise ValueError(f"unknown tiers {sorted(unknown)}; valid: {sorted(TIERS)}")
@@ -74,12 +64,12 @@ def transient_class_ids(tiers: tuple[str, ...] = DEFAULT_TIERS) -> set[int]:
     for tier in tiers:
         names.update(TIERS[tier])
 
-    names -= set(NEVER_MASK)          # belt and braces
+    names -= set(NEVER_MASK)
     return {NAME_TO_ID[n] for n in names}
 
 
+# Readable summary of the taxonomy, for logging into the report.
 def describe_taxonomy(tiers: tuple[str, ...] = DEFAULT_TIERS) -> str:
-    """Human-readable summary, for logging into the report."""
     lines = [f"transient taxonomy ({len(transient_class_ids(tiers))} COCO classes):"]
     for tier in tiers:
         lines.append(f"  {tier:18s} {', '.join(TIERS[tier])}")
@@ -87,11 +77,6 @@ def describe_taxonomy(tiers: tuple[str, ...] = DEFAULT_TIERS) -> str:
     return "\n".join(lines)
 
 
-# Per-class keep thresholds. `person` is the class COCO detectors are best at
-# and the occluder that matters most, so it gets a permissive threshold.
-# Everything else must clear a high bar: the observed failure mode is rare,
-# low-confidence classes (boat, kite, bird) firing on architecture and
-# fireworks, which then masks the landmark itself.
 CONF_THRESHOLDS: dict[str, float] = {
     "person": 0.30,
     "umbrella": 0.40,
@@ -104,6 +89,7 @@ CONF_THRESHOLDS: dict[str, float] = {
 DEFAULT_CONF_THRESHOLD: float = 0.55
 
 
+# Confidence a detection of this class must reach before it is
+# allowed to mask anything.
 def conf_threshold_for(class_name: str) -> float:
-    """Confidence a detection must reach before it is allowed to mask pixels."""
     return CONF_THRESHOLDS.get(class_name, DEFAULT_CONF_THRESHOLD)

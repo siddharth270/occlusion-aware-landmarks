@@ -1,3 +1,7 @@
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# Turns detections into a mask and into the occlusion score that every result in
+# the report is grouped by.
+
 from __future__ import annotations
 
 import cv2
@@ -7,22 +11,13 @@ import pandas as pd
 from landmarks.occlusion.detector import Detection, ImageDetections
 
 
-
+# Flags a detection that is large and centred, which usually means it
+# is the subject rather than something in the way.
 def is_probable_subject(
     box: tuple[float, float, float, float],
     min_area: float = 0.25,
     center_tol: float = 0.30,
 ) -> bool:
-    """True if a detection looks like the photo's subject rather than an occluder.
-
-    Motivated by an observed failure mode: COCO detectors label statues as
-    "person" and monumental facades as "boat". Such detections are large and
-    centred, unlike tourists, who are smaller and distributed (observed median
-    detection area is 0.002 of the frame, against this 0.25 threshold). Skipping
-    them protects the landmark at the cost of leaving some genuine large
-    foreground occluders unmasked -- an explicit precision/recall trade,
-    ablatable via `subject_guard`.
-    """
     x1, y1, x2, y2 = box
     if (x2 - x1) * (y2 - y1) < min_area:
         return False
@@ -30,13 +25,13 @@ def is_probable_subject(
     return abs(cx - 0.5) < center_tol and abs(cy - 0.5) < center_tol
 
 
-
+# Draws every kept detection into one binary mask at the size asked for.
 def render_union_mask(
     dets: list[Detection],
     height: int,
     width: int,
     tiers: tuple[str, ...] | None = None,
-    conf_threshold: float | None = None,     # None -> per-class thresholds
+    conf_threshold: float | None = None,
     dilate_px: int = 4,
     use_segmentation: bool = True,
     subject_guard: bool = True,
@@ -79,23 +74,23 @@ def render_union_mask(
     return mask
 
 
+# Fraction of the image covered by transient content.
 def occlusion_ratio(mask: np.ndarray) -> float:
-    """Fraction of image area covered by transient content, in [0, 1]."""
     if mask.size == 0:
         return 0.0
     return float((mask > 0).sum()) / float(mask.size)
 
 
+# Maps a continuous occlusion ratio to its reporting stratum.
 def assign_bin(ratio: float, bins: tuple[float, ...], labels: tuple[str, ...]) -> str:
-    """Map a continuous occlusion ratio to a reporting stratum."""
     if len(labels) != len(bins) - 1:
         raise ValueError(f"need {len(bins) - 1} labels for {len(bins)} bin edges")
     idx = int(np.digitize(ratio, bins[1:-1], right=False))
     return labels[min(idx, len(labels) - 1)]
 
 
+# Flattens one image's detections into rows ready for storage.
 def detections_to_rows(img_dets: ImageDetections) -> list[dict]:
-    """Flatten to parquet rows. Polygons go in as JSON for portability."""
     import json
 
     rows = []
@@ -120,12 +115,12 @@ def detections_to_rows(img_dets: ImageDetections) -> list[dict]:
     return rows
 
 
+# Counts how many images fall into each occlusion stratum.
 def summarise_occlusion(
     index: pd.DataFrame,
     bins: tuple[float, ...],
     labels: tuple[str, ...],
 ) -> pd.DataFrame:
-    """Per-bin counts and share -- the table that motivates the whole study."""
     index = index.copy()
     index["bin"] = index.occlusion_ratio.apply(lambda r: assign_bin(r, bins, labels))
     summary = (

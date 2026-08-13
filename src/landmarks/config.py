@@ -1,5 +1,7 @@
-# Siddharth Mehta
-# CS5330 PRCV
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# Every setting for the project in one place. get_config builds the settings for
+# one arm, and the three arms differ only in whether masking is applied and how
+# often it happens.
 
 from __future__ import annotations
 
@@ -14,8 +16,8 @@ ON_KAGGLE = Path("/kaggle/input").exists()
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# Finds the competition data, which Kaggle mounts under one of two paths.
 def _find_competition_root() -> Path:
-
     candidates = [
         Path("/kaggle/input/competitions/landmark-recognition-2021"),
         Path("/kaggle/input/landmark-recognition-2021"),
@@ -43,7 +45,7 @@ class SubsetConfig:
     n_classes: int = 1000
     min_images_per_class: int = 30
     max_images_per_class: int = 80
-    split_ratios: tuple[float, float, float] = (0.80, 0.10, 0.10) # train, val, test
+    split_ratios: tuple[float, float, float] = (0.80, 0.10, 0.10)
     verify_files_exist: bool = True
 
 
@@ -54,20 +56,17 @@ class CacheConfig:
 
 @dataclass
 class DetectionConfig:
-    weights: str = "yolov8m-seg.pt"    # 's' had unacceptable false-positive rate
+    weights: str = "yolov8m-seg.pt"
     imgsz: int = 640
-    conf: float = 0.10                 # store low, filter per-class at render time
+    conf: float = 0.10
     iou: float = 0.70
     batch_size: int = 8
-    max_det: int = 100                 # caps per-image mask tensors; see detector.py
+    max_det: int = 100
     use_segmentation: bool = True
     taxonomy_tiers: tuple[str, ...] = ("people", "vehicles", "animals", "portable_objects")
 
 @dataclass
 class OcclusionConfig:
-
-    # occlusion_ratio = union area of transient regions / total image area.
-
     bins: tuple[float, ...] = (0.0, 0.02, 0.10, 0.25, 1.01)
     bin_labels: tuple[str, ...] = ("none", "low", "medium", "high")
 
@@ -75,13 +74,12 @@ class OcclusionConfig:
 @dataclass
 class MaskingConfig:
     enabled: bool = False
-    strategy: str = "mean_fill"        # black | mean_fill | blur | inpaint_telea
-    dilate_px: int = 4                 # grow masks to catch boundary pixels
-    max_mask_fraction: float = 0.85    # skip if masking would erase the image
-    apply_prob: float = 1.0            # 1.0 = deterministic; <1.0 = augmentation
-    subject_guard: bool = True         # skip large centred detections (statues, facades)
-    subject_min_area: float = 0.25     # area fraction above which the guard applies
-
+    strategy: str = "mean_fill"
+    dilate_px: int = 4
+    max_mask_fraction: float = 0.85
+    apply_prob: float = 1.0
+    subject_guard: bool = True
+    subject_min_area: float = 0.25
 
 
 @dataclass
@@ -92,10 +90,6 @@ class ArcFaceConfig:
 
 @dataclass
 class ModelConfig:
-    # timm 1.0 dropped the NoisyStudent B0 weights. The RA4 recipe is timm's
-    # current best B0 checkpoint and is trained at 224px, matching train.image_size
-    # exactly. Verify availability with:
-    #   timm.list_models("*efficientnet_b0*", pretrained=True)
     backbone: str = "efficientnet_b0.ra4_e3600_r224_in1k"
     pretrained: bool = True
     embedding_dim: int = 512
@@ -112,7 +106,7 @@ class TrainConfig:
     num_workers: int = 4
     lr: float = 3e-4
     weight_decay: float = 1e-4
-    warmup_epochs: int = 1 
+    warmup_epochs: int = 1
     label_smoothing: float = 0.0
     amp: bool = True
     grad_clip: float = 5.0
@@ -142,15 +136,17 @@ class Config:
     train: TrainConfig = field(default_factory=TrainConfig)
     eval: EvalConfig = field(default_factory=EvalConfig)
 
+    # Where this arm writes its checkpoint and history.
     @property
     def run_dir(self) -> Path:
         return Path(self.paths.artifacts) / "runs" / self.arm
 
+    # Flattens the config into plain types so it can be saved as JSON.
     def to_dict(self) -> dict:
         return json.loads(json.dumps(asdict(self), default=str))
 
+    # Writes the resolved config next to the run so results stay traceable.
     def save(self, path: str | Path | None = None) -> Path:
-        # Dump the resolved config beside the run so results are traceable.
         path = Path(path) if path else self.run_dir / "config.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w") as f:
@@ -158,8 +154,9 @@ class Config:
         return path
 
 
+# Builds the settings for one arm. The arms differ only in how
+# masking gets applied.
 def get_config(arm: str = "baseline", **overrides) -> Config:
-
     if arm not in ARMS:
         raise ValueError(f"arm must be one of {ARMS}, got {arm!r}")
 

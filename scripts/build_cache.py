@@ -1,16 +1,8 @@
-"""Step 3: one GPU pass producing the cache, masks, detections and occlusion index.
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# Runs the detector over the selected images once and saves everything the rest
+# of the project needs: a resized copy of each image, a mask of the transient
+# objects found in it, all the raw detections, and an occlusion score per image.
 
-Detection and caching are fused deliberately. Ultralytics hands back the decoded
-image on each result (`orig_img`), so resizing from that array costs no extra
-disk read -- important when the source is a 98GB mounted dataset.
-
-Work is chunked and each chunk's outputs are flushed to shards, so a killed
-session resumes from the last completed chunk instead of restarting.
-
-Usage:
-    python scripts/build_cache.py
-    python scripts/build_cache.py --limit 2000 --chunk-size 500   # dry run
-"""
 from __future__ import annotations
 
 import argparse
@@ -37,6 +29,7 @@ from landmarks.utils.io import ensure_dir, gld_image_path
 from landmarks.utils.seed import set_seed
 
 
+# Reads the command line options for the cache build.
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Build the image cache + occlusion index.")
     p.add_argument("--out", type=str, default="/kaggle/working/cache")
@@ -49,6 +42,8 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+# Runs the detector over one chunk of images, then writes the resized
+# image, its mask, and a row of stats for each one.
 def process_chunk(
     det,
     cfg,
@@ -56,21 +51,15 @@ def process_chunk(
     out_dir: Path,
     batch_size: int,
 ) -> tuple[list[dict], list[dict]]:
-    """Detect, cache and mask one chunk. Returns (index_rows, detection_rows)."""
     paths = [gld_image_path(i, cfg.paths.competition) for i in chunk["id"]]
     expected_ids = set(chunk["id"])
     index_rows: list[dict] = []
     det_rows: list[dict] = []
 
-    # Consume the stream incrementally: holding 80k decoded images would need
-    # ~100GB of RAM.
     for r in det.predict(paths, batch_size=batch_size, keep_images=True):
         if r.orig_img is None:
             continue
 
-        # The id is derived from the Result's own source path. If that ever
-        # stops being per-image, every image in a batch would be written under
-        # one id and silently overwrite its neighbours -- so assert instead.
         if r.image_id not in expected_ids:
             raise ValueError(
                 f"detector returned unexpected image_id {r.image_id!r}; "
@@ -92,7 +81,7 @@ def process_chunk(
                    cfg.cache.jpeg_quality)
 
         has_mask = bool(mask.any())
-        if has_mask:                         # ~75% of images need no mask file
+        if has_mask:
             save_mask(mask, cache_path(r.image_id, out_dir, "masks", "png"))
 
         index_rows.append({
@@ -110,6 +99,8 @@ def process_chunk(
     return index_rows, det_rows
 
 
+# Builds the whole cache, picking up where an interrupted run stopped,
+# then merges the shards and checks the output against the manifest.
 def main() -> None:
     args = parse_args()
 
@@ -144,7 +135,7 @@ def main() -> None:
 
     for ci, chunk in enumerate(tqdm(chunks, desc="chunks")):
         idx_path = shard_dir / f"index_{ci:05d}.csv"
-        if idx_path.exists():                 # completed in an earlier session
+        if idx_path.exists():
             continue
 
         index_rows, det_rows = process_chunk(det, cfg, chunk, out_dir, args.batch_size)
@@ -155,7 +146,6 @@ def main() -> None:
         )
         free_gpu()
 
-    # ---- merge shards -------------------------------------------------------
     index = pd.concat(
         [pd.read_csv(p, dtype={"id": str}) for p in sorted(shard_dir.glob("index_*.csv"))],
         ignore_index=True,
@@ -174,11 +164,6 @@ def main() -> None:
     print(f"occlusion ratio: mean={r.mean():.4f} median={np.median(r):.4f} "
           f"zero={np.mean(r == 0):.1%} max={r.max():.3f}")
 
-    # ---- integrity checks ---------------------------------------------------
-    # The index is built in memory while the files are written to disk, so the
-    # two can diverge (duplicate ids, failed writes) without anything raising.
-    # Downstream training would then read a cache that quietly disagrees with
-    # its own manifest, so verify here rather than discover it in Step 4.
     n_img_files = sum(1 for _ in (out_dir / "images").rglob("*.jpg"))
     n_mask_files = sum(1 for _ in (out_dir / "masks").rglob("*.png"))
     n_expect_mask = int(index.has_mask.sum())

@@ -1,9 +1,8 @@
-"""Entry point for Step 1: freeze the experimental subset and its splits.
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# Picks the 1000 most photographed landmarks out of the full dataset, samples up
+# to 80 images from each, and splits them into train, validation and test. The
+# manifests it writes are fixed after this and every later step reads them.
 
-Usage:
-    python scripts/build_subset.py
-    python scripts/build_subset.py --n-classes 500 --max-per-class 60 --no-verify
-"""
 from __future__ import annotations
 
 import argparse
@@ -17,6 +16,7 @@ from landmarks.data.subset import build_subset
 from landmarks.utils.seed import set_seed
 
 
+# Reads the command line options, all of which override a config default.
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Build the GLDv2 experimental subset.")
     p.add_argument("--n-classes", type=int, default=None)
@@ -28,10 +28,10 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+# Builds the frozen subset and writes the split manifests.
 def main() -> None:
     args = parse_args()
 
-    # Subset construction is arm-independent; all arms share one manifest.
     cfg = get_config("baseline")
     if args.seed is not None:
         cfg.seed = args.seed

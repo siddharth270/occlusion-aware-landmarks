@@ -1,4 +1,7 @@
-"""Occlusion distribution figure for the report (regenerated from all 80k images)."""
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# Draws the figure showing how occlusion is spread across the dataset, with the
+# four strata on one panel and the shape of the non zero tail on the other.
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -9,7 +12,6 @@ SURFACE   = "#fcfcfb"
 INK       = "#0b0b0b"
 INK_2     = "#52514e"
 GRID      = "#e3e2df"
-# Ordinal blue ramp (validated: monotone L, one hue, light end 2.06:1 on surface)
 RAMP      = ["#86b6ef", "#5598e7", "#2a78d6", "#184f95"]
 
 idx = pd.read_csv("manifests/occlusion_index.csv", dtype={"id": str})
@@ -28,7 +30,6 @@ for ax in (ax1, ax2):
         ax.spines[s].set_color(GRID)
     ax.tick_params(colors=INK_2, labelsize=8, length=3, color=GRID)
 
-# --- Panel A: the analysis strata -------------------------------------------
 bars = ax1.bar(LABELS, counts, color=RAMP, width=0.66, linewidth=0)
 ax1.set_axisbelow(True)
 ax1.yaxis.grid(True, color=GRID, linewidth=0.7)
@@ -44,14 +45,11 @@ ax1.set_xlabel("occlusion stratum", fontsize=9, color=INK_2)
 ax1.set_title("(a) Evaluation strata, all 80,000 images",
               fontsize=9.5, color=INK, loc="left", pad=10)
 
-# --- Panel B: shape of the non-zero tail ------------------------------------
 nz = r[r > 0]
 ax2.hist(nz, bins=60, color=RAMP[2], linewidth=0)
 ax2.set_yscale("log")
 ax2.set_axisbelow(True)
 ax2.yaxis.grid(True, color=GRID, linewidth=0.7)
-# 0.005 and 0.05 sit close on a linear axis, so stagger the labels vertically
-# rather than letting them overprint.
 top = ax2.get_ylim()[1]
 for edge, frac in zip(EDGES[1:-1], (0.55, 0.12, 0.55)):
     ax2.axvline(edge, color=INK_2, linestyle=(0, (3, 3)), linewidth=0.9, alpha=0.65)

@@ -1,14 +1,8 @@
-"""Per-stratum bootstrap CIs and paired deltas from the saved prediction files.
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# Adds bootstrap confidence intervals to the results for each occlusion level and
+# compares every model against the baseline within each level. It works from the
+# saved predictions, so it needs no GPU.
 
-evaluate.py reports stratified GAP as point estimates only. With 123 test images
-in the `high` stratum, a bare point estimate is not interpretable -- this adds
-the interval, and the paired within-stratum delta against the baseline.
-
-Runs on CPU from preds_*.parquet alone; no GPU, no model, no cache needed.
-
-    python scripts/stratified_ci.py --results /kaggle/working/artifacts/results
-    python scripts/stratified_ci.py --results ~/Downloads/results --iters 2000
-"""
 from __future__ import annotations
 
 import argparse
@@ -27,6 +21,7 @@ BINS = (0.0, 0.02, 0.10, 0.25, 1.01)
 LABELS = ("none", "low", "medium", "high")
 
 
+# Reads the command line options for the stratified analysis.
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Per-stratum GAP CIs from saved predictions.")
     p.add_argument("--results", type=str, default="/kaggle/working/artifacts/results")
@@ -37,11 +32,13 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+# Puts each occlusion ratio into its stratum.
 def bin_of(ratio: np.ndarray) -> pd.Categorical:
     return pd.cut(ratio, bins=list(BINS), right=False,
                   labels=list(LABELS), include_lowest=True)
 
 
+# Returns GAP together with a bootstrap confidence interval around it.
 def gap_ci(labels, preds, confs, iters, seed=42):
     point = global_average_precision(labels, preds, confs)
     rng = np.random.default_rng(seed)
@@ -54,6 +51,8 @@ def gap_ci(labels, preds, confs, iters, seed=42):
     return point, float(lo), float(hi)
 
 
+# Adds confidence intervals to the stratified results and compares
+# every cell against the baseline.
 def main() -> None:
     args = parse_args()
     root = Path(args.results)
@@ -68,7 +67,6 @@ def main() -> None:
         raise FileNotFoundError(f"no preds_*.parquet under {root}")
     print(f"loaded {len(cells)} cells: {', '.join(cells)}\n")
 
-    # ---- per-cell, per-stratum GAP with CI ---------------------------------
     rows = []
     for key, df in cells.items():
         for stratum in LABELS + ("ALL",):
@@ -85,7 +83,6 @@ def main() -> None:
     table = pd.DataFrame(rows)
     print(table.to_string(index=False))
 
-    # ---- paired within-stratum deltas vs the reference cell ----------------
     ref = args.baseline
     if ref not in cells:
         raise KeyError(f"reference cell {ref!r} not found; have {list(cells)}")
@@ -101,8 +98,6 @@ def main() -> None:
             a, b = cells[ref][m], df[m]
             if len(a) == 0:
                 continue
-            # Rows are in identical order across cells (evaluate.py used
-            # shuffle=False on one frame), so positional pairing is valid.
             res = paired_bootstrap_delta(
                 a.label.values, a.pred.values, a.conf.values,
                 b.pred.values, b.conf.values, iters=args.iters,

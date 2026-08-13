@@ -1,3 +1,6 @@
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# Builds the fixed subset of the dataset and splits it. Splitting happens inside
+# each class so that no landmark ends up missing from training.
 
 from __future__ import annotations
 
@@ -11,8 +14,8 @@ from tqdm.auto import tqdm
 from landmarks.utils.io import ensure_dir, gld_image_path, write_json
 
 
+# Reads the competition label file.
 def load_train_csv(competition_root: str | Path) -> pd.DataFrame:
-    """Read the full competition label file (id, landmark_id)."""
     df = pd.read_csv(Path(competition_root) / "train.csv", dtype={"id": str})
     expected = {"id", "landmark_id"}
     if not expected.issubset(df.columns):
@@ -20,12 +23,13 @@ def load_train_csv(competition_root: str | Path) -> pd.DataFrame:
     return df
 
 
+# Picks the most photographed classes and gives each one a
+# contiguous label.
 def select_classes(
     train_df: pd.DataFrame,
     n_classes: int,
     min_images_per_class: int,
 ) -> pd.DataFrame:
-
     counts = train_df.groupby("landmark_id").size().rename("n_available").reset_index()
     eligible = counts[counts.n_available >= min_images_per_class]
 
@@ -35,7 +39,6 @@ def select_classes(
             f"but n_classes={n_classes} was requested"
         )
 
-    # Sort by count desc, then landmark_id asc to break ties deterministically.
     selected = (
         eligible.sort_values(["n_available", "landmark_id"], ascending=[False, True])
         .head(n_classes)
@@ -45,33 +48,26 @@ def select_classes(
     return selected[["landmark_id", "label", "n_available"]]
 
 
+# Takes up to a fixed number of images per class, shuffled but
+# reproducible from the seed.
 def sample_images(
     train_df: pd.DataFrame,
     class_map: pd.DataFrame,
     max_images_per_class: int,
     seed: int,
 ) -> pd.DataFrame:
-    """Take up to `max_images_per_class` images from each selected class.
-
-    Shuffling once before the per-class head() keeps the choice random but
-    fully reproducible from `seed`.
-    """
     df = train_df.merge(class_map[["landmark_id", "label"]], on="landmark_id", how="inner")
     df = df.sample(frac=1.0, random_state=seed).reset_index(drop=True)
     df = df.groupby("landmark_id", sort=False).head(max_images_per_class)
     return df.sort_values(["label", "id"]).reset_index(drop=True)
 
 
+# Drops rows whose image file is missing, checked in parallel.
 def verify_images_exist(
     df: pd.DataFrame,
     competition_root: str | Path,
     workers: int = 16,
 ) -> tuple[pd.DataFrame, int]:
-    """Drop rows whose JPEG is missing on disk.
-
-    Cheap insurance: a handful of missing files would otherwise surface as
-    crashes deep inside a 90-minute training run.
-    """
     paths = [gld_image_path(i, competition_root) for i in df["id"]]
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -81,17 +77,13 @@ def verify_images_exist(
     return df[mask].reset_index(drop=True), int((~mask).sum())
 
 
+# Splits inside each class so that no class ends up missing
+# from training.
 def stratified_split(
     df: pd.DataFrame,
     ratios: tuple[float, float, float],
     seed: int,
 ) -> pd.DataFrame:
-    """Split within each class so every class appears in every split.
-
-    A global random split can starve a class of training images entirely.
-    Splitting per class guarantees train coverage and keeps the val/test class
-    distributions identical to train's.
-    """
     train_r, val_r, _ = ratios
     if not np.isclose(sum(ratios), 1.0):
         raise ValueError(f"split_ratios must sum to 1.0, got {ratios}")
@@ -101,8 +93,8 @@ def stratified_split(
 
     for _, idx in shuffled.groupby("label", sort=False).indices.items():
         n = len(idx)
-        n_train = max(1, int(np.floor(n * train_r)))     # never starve train
-        n_val = min(int(np.floor(n * val_r)), n - n_train)  # never overflow
+        n_train = max(1, int(np.floor(n * train_r)))
+        n_val = min(int(np.floor(n * val_r)), n - n_train)
 
         splits[idx[:n_train]] = "train"
         splits[idx[n_train : n_train + n_val]] = "val"
@@ -112,8 +104,9 @@ def stratified_split(
     return shuffled.sort_values(["label", "split", "id"]).reset_index(drop=True)
 
 
+# Checks the manifest for duplicates, gaps and missing classes
+# before anything downstream uses it.
 def validate_manifest(subset: pd.DataFrame, class_map: pd.DataFrame) -> None:
-    """Fail loudly now rather than silently corrupting every later result."""
     assert subset["id"].is_unique, "duplicate image ids in subset"
     assert subset["split"].isin(["train", "val", "test"]).all(), "bad split value"
 
@@ -128,8 +121,8 @@ def validate_manifest(subset: pd.DataFrame, class_map: pd.DataFrame) -> None:
     )
 
 
+# Runs the whole subset build and writes the manifests.
 def build_subset(cfg) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """End-to-end: full train.csv -> written, validated manifests."""
     sub = cfg.subset
 
     train_df = load_train_csv(cfg.paths.competition)
@@ -151,7 +144,6 @@ def build_subset(cfg) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     subset = stratified_split(subset, sub.split_ratios, cfg.seed)
 
-    # Recount after sampling/verification so class_map reflects what we actually have.
     n_sampled = subset.groupby("label").size().rename("n_sampled")
     class_map = class_map.merge(n_sampled, on="label", how="left")
     class_map["n_sampled"] = class_map["n_sampled"].fillna(0).astype(int)
@@ -183,15 +175,16 @@ def build_subset(cfg) -> tuple[pd.DataFrame, pd.DataFrame]:
     return subset, class_map
 
 
+# Reads the frozen split manifest, optionally for a single split.
 def load_subset(cfg, split: str | None = None) -> pd.DataFrame:
-    """Read the frozen manifest. Every downstream step uses this, never build_subset."""
     path = Path(cfg.paths.manifests) / "subset_splits.csv"
-    if not path.exists():                      # fall back to the writable copy
+    if not path.exists():
         path = Path(cfg.paths.manifests_out) / "subset_splits.csv"
     df = pd.read_csv(path, dtype={"id": str})
     return df[df.split == split].reset_index(drop=True) if split else df
 
 
+# Reads the mapping from landmark id to training label.
 def load_class_map(cfg) -> pd.DataFrame:
     path = Path(cfg.paths.manifests) / "class_map.csv"
     if not path.exists():

@@ -1,15 +1,7 @@
-"""GAP broken down by occlusion level.
+# Siddharth Mehta, CS5330 PRCV, Final Project
+# Breaks the results down by how occluded each image is. This is where the project
+# expects to see a difference, since most images have no occlusion at all.
 
-This is the analysis the project exists for. An overall GAP difference between
-arms is easy to dismiss as noise or as an artefact of the fill colour; a
-*monotonic* divergence across occlusion strata is much harder to explain any
-other way.
-
-GAP within a stratum is computed over that stratum alone (M = stratum size), so
-the numbers are comparable across strata but are not a decomposition of overall
-GAP -- ranking is global in the full metric and local here. That is the standard
-way stratified GAP is reported, and it is stated in the report.
-"""
 from __future__ import annotations
 
 import numpy as np
@@ -19,6 +11,7 @@ from landmarks.eval.gap import global_average_precision
 from landmarks.occlusion.metrics import assign_bin
 
 
+# Labels each row with the occlusion stratum it belongs to.
 def add_occlusion_bin(
     frame: pd.DataFrame,
     bins: tuple[float, ...],
@@ -29,6 +22,8 @@ def add_occlusion_bin(
     return out
 
 
+# GAP, top-1 and support for every occlusion stratum and for the
+# set as a whole.
 def stratified_gap(
     frame: pd.DataFrame,
     preds: np.ndarray,
@@ -36,13 +31,6 @@ def stratified_gap(
     bins: tuple[float, ...],
     labels: tuple[str, ...],
 ) -> pd.DataFrame:
-    """Per-stratum GAP, top-1 and support.
-
-    Args:
-        frame: evaluation rows in the SAME ORDER as preds/confs (guaranteed by
-            using shuffle=False in the eval DataLoader).
-        preds, confs: predicted class and its confidence per image.
-    """
     if not (len(frame) == len(preds) == len(confs)):
         raise ValueError("frame, preds and confs must be aligned and equal length")
 
@@ -74,13 +62,9 @@ def stratified_gap(
     return pd.DataFrame(rows + [overall])
 
 
+# Reshapes the per cell results into the training arm by evaluation
+# input matrix.
 def cross_condition_table(results: dict[tuple[str, str], pd.DataFrame]) -> pd.DataFrame:
-    """Pivot {(arm, eval_condition): stratified_df} into the 2x2 GAP matrix.
-
-    The off-diagonal cells are the informative ones: they separate "masking
-    helps the model learn better features" from "masking merely makes train and
-    test look alike".
-    """
     rows = []
     for (arm, condition), df in results.items():
         overall = df[df.occlusion_bin == "ALL"].iloc[0]
